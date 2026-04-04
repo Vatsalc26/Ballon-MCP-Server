@@ -1,0 +1,24 @@
+{
+  "title": "Balloon MCP Server",
+  "upload_type": "software",
+  "description": "Balloon MCP Server is an MCP server for context fidelity in long AI sessions. It implements the current external approximation of the Balloon architecture through structured profile extraction, CARA-style gap auditing, targeted retrieval, proxy trickle, and a memory ledger. This public alpha is a working MCP server and a citable software artifact, not a provider-level hidden-state implementation.",
+  "creators": [
+    {
+      "name": "Chavda, Vatsal"
+    }
+  ],
+  "license": "MIT",
+  "access_right": "open",
+  "keywords": [
+    "balloon mcp",
+    "model context protocol",
+    "context fidelity",
+    "long-horizon reasoning",
+    "multi-turn conversation",
+    "CARA",
+    "trickle injection",
+    "targeted retrieval"
+  ],
+  "version": "0.1.0-alpha.0",
+  "notes": "Zenodo-ready metadata for the Balloon MCP public software release. Keep package.json, CHANGELOG.md, CITATION.cff, and .zenodo.json aligned with the release tag. Add related identifiers to the Balloon Architecture paper records during the Zenodo release flow."
+}

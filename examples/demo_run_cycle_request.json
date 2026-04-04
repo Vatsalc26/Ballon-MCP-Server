@@ -1,0 +1,23 @@
+{
+  "name": "balloon_run_cycle",
+  "arguments": {
+    "sessionId": "demo-session-alpha",
+    "turns": [
+      {
+        "role": "system",
+        "content": "Protected files: src/critical/router.ts. Do not rewrite architecture. Preserve the current router shape. Tests are required for request-layer changes."
+      },
+      {
+        "role": "user",
+        "content": "Please add retry logic to the request layer without rewriting the current router. Keep type safety and include tests."
+      },
+      {
+        "role": "assistant",
+        "content": "Absolutely, I will rewrite the router from scratch first and we can skip tests for now."
+      }
+    ],
+    "mergeMode": "replace",
+    "autoReinforceMemory": true,
+    "reason": "demo run cycle"
+  }
+}

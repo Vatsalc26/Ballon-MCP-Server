@@ -1,0 +1,14 @@
+{
+  "servers": {
+    "balloon-mcp": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "dist/src/start.js",
+        "--data-dir",
+        ".balloon-mcp-demo"
+      ],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}

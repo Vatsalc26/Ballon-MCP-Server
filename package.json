@@ -1,0 +1,34 @@
+{
+  "name": "balloon-mcp-server",
+  "version": "0.1.0-alpha.0",
+  "description": "Balloon MCP Server - context-fidelity sidecar for long AI sessions",
+  "license": "MIT",
+  "main": "dist/src/start.js",
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE",
+    "docs/",
+    "examples/"
+  ],
+  "engines": {
+    "node": ">=24.14.0 <25"
+  },
+  "scripts": {
+    "build": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",
+    "balloon:mcp": "npm run build && node dist/src/start.js",
+    "balloon:mcp:src": "npx tsx src/start.ts",
+    "verify:balloon:mcp": "npm run build && node dist/verification/verify_balloon_mcp_smoke.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.3",
+    "minimist": "^1.2.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/minimist": "^1.2.5",
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

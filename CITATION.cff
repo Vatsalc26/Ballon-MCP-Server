@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use Balloon MCP, please cite the software using this metadata and keep it aligned with package.json, CHANGELOG.md, and .zenodo.json."
+title: "Balloon MCP Server"
+type: software
+authors:
+  - family-names: "Chavda"
+    given-names: "Vatsal"
+abstract: "Balloon MCP Server is the current external approximation of the Balloon architecture for context fidelity in long AI sessions."
+version: "0.1.0-alpha.0"
+license: "MIT"
+keywords:
+  - "balloon mcp"
+  - "model context protocol"
+  - "context fidelity"
+  - "long-horizon reasoning"
+  - "CARA"
+  - "trickle injection"
+  - "targeted retrieval"

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "balloon-mcp": {
+      "command": "node",
+      "args": [
+        "dist/src/start.js",
+        "--data-dir",
+        ".balloon-mcp-demo"
+      ],
+      "cwd": "REPLACE_WITH_YOUR_BALLOON_MCP_REPO_PATH"
+    }
+  }
+}
