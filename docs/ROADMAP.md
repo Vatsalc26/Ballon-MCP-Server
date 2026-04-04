@@ -60,7 +60,7 @@ In short:
 The next useful steps are:
 
 1. stronger prompt quality and cleaner repaired replies
-2. more realistic long-session evaluations
+2. a first Balloon-vs-baseline evaluation pass on realistic long-session tasks
 3. better demo quality and host reliability
 4. cleaner public examples and install paths
 5. bounded repo-aware grounding only where it materially improves CARA
@@ -73,7 +73,20 @@ After the alpha is stable, the next layer should focus on:
 2. better gap scoring and ranking
 3. stronger similarity-gated release behavior
 4. evaluation on longer coding sessions
-5. comparison against baseline long-session drift
+5. comparison against baseline long-session drift, including SlopCodeBench-style erosion and verbosity measurements where feasible
+
+## Evaluation Track
+
+The evaluation story matters because Balloon is making a long-session quality claim, not only a protocol claim.
+
+The next benchmark layer should proceed in this order:
+
+1. a small Balloon-vs-baseline pilot on reproducible long-session coding scenarios
+2. trajectory capture for repaired vs unrepaired runs
+3. measurement of visible drift, omission rate, and repair quality
+4. later comparison against public long-horizon benchmarks such as SlopCodeBench-style erosion and verbosity signals
+
+Do not claim benchmark wins before the runs exist and the results are reproducible.
 
 ## Long-Term Roadmap
 
