@@ -60,4 +60,4 @@ Please do not open a public issue for a security-sensitive vulnerability. See [S
 
 The project is released under the MIT License.
 
-Unless explicitly stated otherwise, any contribution intentionally submitted for inclusion in this project is submitted under the same MIT license terms. In practical terms, this means inbound contributions follow the same outbound license as the repo.
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this project is provided under the MIT License, without additional terms or conditions. In practical terms, inbound contributions use the same MIT terms that the project distributes outbound.
