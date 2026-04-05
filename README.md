@@ -170,12 +170,13 @@ If the demo feels good, the important part is not that Balloon produced more tex
 
 1. [Installation](./docs/INSTALL.md)
 2. [Demo workflow](./docs/DEMO_WORKFLOW.md)
-3. [Semantic CARA](./docs/SEMANTIC_CARA.md)
-4. [Staged external Balloon](./docs/STAGED_EXTERNAL_BALLOON.md)
-5. [Benchmark lanes](./docs/BENCHMARK_LANES.md)
-6. [Architecture roadmap](./docs/ROADMAP.md)
-7. [Contributing](./CONTRIBUTING.md)
-8. [Security policy](./SECURITY.md)
+3. [Current readiness](./docs/READINESS.md)
+4. [Semantic CARA](./docs/SEMANTIC_CARA.md)
+5. [Staged external Balloon](./docs/STAGED_EXTERNAL_BALLOON.md)
+6. [Benchmark lanes](./docs/BENCHMARK_LANES.md)
+7. [Architecture roadmap](./docs/ROADMAP.md)
+8. [Contributing](./CONTRIBUTING.md)
+9. [Security policy](./SECURITY.md)
 
 ## Good Fit
 
