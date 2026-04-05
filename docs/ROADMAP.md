@@ -59,9 +59,9 @@ In short:
 
 The next useful steps are:
 
-1. stronger prompt quality and cleaner repaired replies
+1. stronger prompt-routing and host-surface reliability
 2. a first Balloon-vs-baseline evaluation pass on realistic long-session tasks
-3. better demo quality and host reliability
+3. cleaner repaired replies and better demo quality
 4. cleaner public examples and install paths
 5. bounded repo-aware grounding only where it materially improves CARA
 
@@ -73,7 +73,7 @@ After the alpha is stable, the next layer should focus on:
 2. better gap scoring and ranking
 3. stronger similarity-gated release behavior
 4. evaluation on longer coding sessions
-5. comparison against baseline long-session drift, including SlopCodeBench-style erosion and verbosity measurements where feasible
+5. comparison against baseline long-session drift, including code-grounded erosion and verbosity-style measurements where feasible
 
 ## Evaluation Track
 
