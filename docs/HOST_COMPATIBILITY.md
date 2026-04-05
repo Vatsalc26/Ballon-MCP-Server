@@ -35,6 +35,7 @@ Why:
 Use the example file:
 
 1. [../examples/cline_mcp_settings.example.json](../examples/cline_mcp_settings.example.json)
+2. [CLINE_QUICKSTART.md](./CLINE_QUICKSTART.md)
 
 #### Roo Code
 
@@ -49,6 +50,7 @@ Why:
 Use the example file as a starting point only:
 
 1. [../examples/roo_mcp.example.json](../examples/roo_mcp.example.json)
+2. [ROO_CODE_QUICKSTART.md](./ROO_CODE_QUICKSTART.md)
 
 Prefer:
 

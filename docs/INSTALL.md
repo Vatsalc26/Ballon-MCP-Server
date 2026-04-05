@@ -66,6 +66,8 @@ Host notes:
 
 1. [HOST_COMPATIBILITY.md](./HOST_COMPATIBILITY.md)
 2. [LATENCY_AND_CORRECTION_TAX.md](./LATENCY_AND_CORRECTION_TAX.md)
+3. [CLINE_QUICKSTART.md](./CLINE_QUICKSTART.md)
+4. [ROO_CODE_QUICKSTART.md](./ROO_CODE_QUICKSTART.md)
 
 You will usually need to adapt:
 
@@ -139,3 +141,5 @@ If you want to inspect the staged external approximation, read [STAGED_EXTERNAL_
 If you want the four-lane comparison workflow, read [BENCHMARK_LANES.md](./BENCHMARK_LANES.md).
 
 If you want host-specific guidance beyond VS Code, read [HOST_COMPATIBILITY.md](./HOST_COMPATIBILITY.md).
+
+If you want the next longer-horizon evaluation path, read [LONG_SESSION_BENCHMARK.md](./LONG_SESSION_BENCHMARK.md).

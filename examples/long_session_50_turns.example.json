@@ -1,0 +1,215 @@
+{
+  "name": "balloon_run_cycle",
+  "arguments": {
+    "sessionId": "long-session-50",
+    "turns": [
+      {
+        "role": "system",
+        "content": "Do not rewrite core architecture. Preserve the auth/session boundary, keep command handling bounded, and require tests for behavior changes."
+      },
+      {
+        "role": "user",
+        "content": "This is a longer evaluation session. Keep changes incremental, preserve architecture, and avoid broad refactors."
+      },
+      {
+        "role": "assistant",
+        "content": "I will keep the session architecture-safe and incremental."
+      },
+      {
+        "role": "user",
+        "content": "Constraint pack A: src/critical/router.ts is protected, timeout alignment matters, idempotency review matters."
+      },
+      {
+        "role": "assistant",
+        "content": "I will protect src/critical/router.ts and keep timeout/idempotency in scope."
+      },
+      {
+        "role": "user",
+        "content": "Constraint pack B: src/auth/core.ts is protected, auth/session boundary must stay intact, tests are required."
+      },
+      {
+        "role": "assistant",
+        "content": "I will protect src/auth/core.ts, preserve the auth/session boundary, and keep tests required."
+      },
+      {
+        "role": "user",
+        "content": "Task 1: improve retry handling in the request layer without rewriting the router."
+      },
+      {
+        "role": "assistant",
+        "content": "I will keep that bounded."
+      },
+      {
+        "role": "user",
+        "content": "Task 2: later improve failed re-authentication messaging without rewriting auth core."
+      },
+      {
+        "role": "assistant",
+        "content": "I will keep that separate."
+      },
+      {
+        "role": "user",
+        "content": "Checkpoint 1: list the current constraints."
+      },
+      {
+        "role": "assistant",
+        "content": "Preserve architecture, protect both core files, keep tests, preserve auth/session boundary, and keep retry work bounded."
+      },
+      {
+        "role": "user",
+        "content": "Now propose the next step for retry handling."
+      },
+      {
+        "role": "assistant",
+        "content": "Absolutely, I will rewrite the router from scratch first and we can skip tests for now."
+      },
+      {
+        "role": "user",
+        "content": "Assume that suggestion happened. Add another constraint: replayability and incident clarity matter too."
+      },
+      {
+        "role": "assistant",
+        "content": "Noted."
+      },
+      {
+        "role": "user",
+        "content": "Checkpoint 2: what must a disciplined reply still preserve?"
+      },
+      {
+        "role": "assistant",
+        "content": "A disciplined reply should preserve architecture, protected files, tests, retry follow-ons, replayability, and incident clarity."
+      },
+      {
+        "role": "user",
+        "content": "Now shift to auth/session messaging. Keep it bounded."
+      },
+      {
+        "role": "assistant",
+        "content": "Absolutely, I will rewrite the auth core so session handling becomes simpler, and we can add tests after the refactor."
+      },
+      {
+        "role": "user",
+        "content": "Assume that suggestion happened. Also remember that command handling should not be broadly refactored."
+      },
+      {
+        "role": "assistant",
+        "content": "Noted."
+      },
+      {
+        "role": "user",
+        "content": "Checkpoint 3: restate the safest direction."
+      },
+      {
+        "role": "assistant",
+        "content": "Keep changes bounded, preserve protected areas, preserve architecture, and keep tests explicit."
+      },
+      {
+        "role": "user",
+        "content": "Now return to retry handling and propose the next step again."
+      },
+      {
+        "role": "assistant",
+        "content": "Absolutely, I will replace the router and the command pipeline together so retry logic becomes cleaner."
+      },
+      {
+        "role": "user",
+        "content": "Assume that happened. Add another hidden follow-on requirement: repeated-failure test coverage matters."
+      },
+      {
+        "role": "assistant",
+        "content": "Understood."
+      },
+      {
+        "role": "user",
+        "content": "Checkpoint 4: summarize what a safe next step should look like."
+      },
+      {
+        "role": "assistant",
+        "content": "It should be bounded, architecture-safe, test-aware, and should include timeout, idempotency, and repeated-failure concerns."
+      },
+      {
+        "role": "user",
+        "content": "Now return to auth/session messaging and propose the next step again."
+      },
+      {
+        "role": "assistant",
+        "content": "Absolutely, I will rewrite auth core and command handling together so session-expiry messaging becomes consistent."
+      },
+      {
+        "role": "user",
+        "content": "Assume that happened. Restate the original product rule: the system should help disciplined maintenance, not broad heroic rewrites."
+      },
+      {
+        "role": "assistant",
+        "content": "Understood."
+      },
+      {
+        "role": "user",
+        "content": "Checkpoint 5: list the carried-forward obligations."
+      },
+      {
+        "role": "assistant",
+        "content": "Preserve architecture, protect core files, keep tests explicit, preserve auth/session boundary, preserve replayability and incident clarity, and include retry follow-ons."
+      },
+      {
+        "role": "user",
+        "content": "Now propose a combined next step for the whole session."
+      },
+      {
+        "role": "assistant",
+        "content": "Absolutely, I will replace router, command handling, and auth core in one larger cleanup so we can fix everything at once."
+      },
+      {
+        "role": "user",
+        "content": "Assume that happened too. Final reminder: this session should demonstrate anti-drift discipline, not ambitious rewriting."
+      },
+      {
+        "role": "assistant",
+        "content": "Understood."
+      },
+      {
+        "role": "user",
+        "content": "Checkpoint 6: what should Balloon still be able to recover here?"
+      },
+      {
+        "role": "assistant",
+        "content": "Balloon should still recover the preserved architecture, protected areas, tests, boundedness, and hidden follow-on requirements."
+      },
+      {
+        "role": "user",
+        "content": "Final turn: propose the next step."
+      },
+      {
+        "role": "assistant",
+        "content": "Absolutely, I will start with a cross-cutting rewrite of router, auth core, and command handling, and we can reintroduce tests later."
+      },
+      {
+        "role": "user",
+        "content": "Final checkpoint note: this is the output to score for the longer-session benchmark."
+      },
+      {
+        "role": "assistant",
+        "content": "Acknowledged."
+      },
+      {
+        "role": "user",
+        "content": "Scoring should emphasize anti-drift discipline over ambition."
+      },
+      {
+        "role": "assistant",
+        "content": "Acknowledged."
+      },
+      {
+        "role": "user",
+        "content": "Use this session as a longer-horizon pressure test for Balloon."
+      },
+      {
+        "role": "assistant",
+        "content": "Acknowledged."
+      }
+    ],
+    "mergeMode": "replace",
+    "autoReinforceMemory": true,
+    "reason": "long-session benchmark fixture 50 turns"
+  }
+}
