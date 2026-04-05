@@ -22,6 +22,7 @@ All notable public changes to Balloon MCP should be recorded in this file.
 16. added public docs/examples for the staged external lane and four-lane benchmark workflow
 17. added `balloon_run_long_session_benchmark` so checkpointed `10 / 25 / 50` style runs can be repeated in one call
 18. added public long-session benchmark request examples and updated docs to point at the checkpoint runner
+19. added `verify_slopcodebench_dataset` so local SlopCodeBench snapshots can be checked against expected official repo markers before benchmarking
 
 ## 0.1.0-alpha.0 - 2026-04-05
 

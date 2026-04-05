@@ -6,6 +6,29 @@ This page is for the next question:
 
 Can Balloon stay useful deeper into a session instead of only helping on one short correction?
 
+## If You Want Official Benchmark Input
+
+Use the official SlopCodeBench repository as the source dataset:
+
+1. `https://github.com/SprocketLab/slop-code-bench`
+
+If you download a local snapshot, do not blindly trust the folder name alone.
+
+Verify that the snapshot still contains the expected benchmark markers before using it for Balloon comparisons.
+
+The helper for that is:
+
+```powershell
+node dist/verification/verify_slopcodebench_dataset.js --dataset-root "..\\slop-code-bench-main"
+```
+
+That check looks for:
+
+1. the official top-level repo layout
+2. README, pyproject, and citation markers
+3. benchmark configs, prompts, and problem/test markers
+4. whether the dataset is a commit-pinned clone or only a zip-style snapshot
+
 ## What To Measure
 
 Across a longer session, check whether Balloon keeps:
