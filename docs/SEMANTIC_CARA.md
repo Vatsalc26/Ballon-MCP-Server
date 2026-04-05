@@ -106,6 +106,11 @@ For a simple preview request payload, see [../examples/demo_semantic_preview_req
 
 For a side-by-side deterministic vs hybrid comparison payload, see [../examples/demo_compare_repair_lanes_request.json](../examples/demo_compare_repair_lanes_request.json).
 
+Path note:
+
+1. in the standalone public repo, `.\examples\semantic_cara_adapter.example.mjs` is the normal path
+2. from other launch directories, Balloon now also attempts package-relative resolutions before failing
+
 That example is intentionally simple.
 
 It is not meant to be the final semantic adapter.

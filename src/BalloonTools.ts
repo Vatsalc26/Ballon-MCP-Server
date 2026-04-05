@@ -123,7 +123,8 @@ function formatSemanticCara(result: SemanticCaraResult): string {
 		`Mode: ${result.mode}`,
 		`Source: ${result.providerMeta.source}`,
 		`Duration: ${result.providerMeta.durationMs} ms`,
-		...(result.providerMeta.adapterPath ? [`Adapter: ${result.providerMeta.adapterPath}`] : []),
+		...(result.providerMeta.requestedAdapterPath ? [`Requested adapter: ${result.providerMeta.requestedAdapterPath}`] : []),
+		...(result.providerMeta.adapterPath ? [`Resolved adapter: ${result.providerMeta.adapterPath}`] : []),
 		...(result.notes.length > 0 ? ["Notes:", ...result.notes.map((note, index) => `${index + 1}. ${note}`)] : ["Notes: none"]),
 		...(result.suggestedAdditions.length > 0 ? ["Suggested additions:", ...result.suggestedAdditions.map((item, index) => `${index + 1}. ${item}`)] : []),
 		...(result.error ? [`Error: ${result.error}`] : []),
@@ -589,10 +590,18 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					semanticMaxNotes: args.semanticMaxNotes,
 				})
 				if (!hybrid) return toolError(`Could not build a hybrid repair packet for session ${sessionId}.`)
-				const laneChanged =
-					deterministic.repairedReply.trim() !== hybrid.repairedReply.trim() ||
+				const replyChanged = deterministic.repairedReply.trim() !== hybrid.repairedReply.trim()
+				const semanticSignalChanged =
 					hybrid.semanticCara.notes.length > 0 ||
-					hybrid.semanticCara.status !== "disabled"
+					hybrid.semanticCara.status !== "disabled" ||
+					(hybrid.semanticCara.suggestedAdditions?.length ?? 0) > 0 ||
+					Boolean(hybrid.semanticCara.error)
+				const laneChanged = replyChanged || semanticSignalChanged
+				const laneDeltaSummary = replyChanged
+					? "Hybrid lane changed the repaired reply."
+					: semanticSignalChanged
+						? "Hybrid lane added semantic signal but did not change the repaired reply."
+						: "Hybrid lane did not materially change the repaired output for this session."
 				const text = [
 					"Balloon repair lane comparison ready.",
 					"",
@@ -606,7 +615,9 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					formatSemanticCara(hybrid.semanticCara),
 					"",
 					"Lane delta",
-					laneChanged ? "Hybrid lane produced additional semantic signal for this session." : "Hybrid lane did not materially change the repaired output for this session.",
+					`Reply changed: ${replyChanged ? "yes" : "no"}`,
+					`Semantic signal changed: ${semanticSignalChanged ? "yes" : "no"}`,
+					laneDeltaSummary,
 				].join("\n")
 				return textResult(text, {
 					sessionId,
@@ -620,7 +631,10 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					deterministicCorrectionSummary: deterministic.correctionSummary,
 					hybridReply: hybrid.repairedReply,
 					hybridCorrectionSummary: hybrid.correctionSummary,
+					replyChanged,
+					semanticSignalChanged,
 					laneChanged,
+					laneDeltaSummary,
 					semanticCaraConfig: hybrid.semanticCaraConfig,
 					semanticCara: hybrid.semanticCara,
 					promptMessages: hybrid.messages,

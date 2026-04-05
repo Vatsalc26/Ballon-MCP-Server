@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process"
+import fs from "node:fs"
 import path from "node:path"
 import type { SemanticCaraConfig, SemanticCaraMode, SemanticCaraPacket, SemanticCaraResult } from "./types"
 
@@ -149,6 +150,7 @@ function shadowResult(packet: SemanticCaraPacket, config: SemanticCaraConfig, st
 		error,
 		providerMeta: {
 			adapterPath: config.adapterPath,
+			requestedAdapterPath: config.adapterPath,
 			durationMs: 0,
 			source: "shadow",
 		},
@@ -169,8 +171,29 @@ function parseAdapterPayload(stdout: string): Partial<Pick<SemanticCaraResult, "
 	}
 }
 
-function resolveAdapterCommand(adapterPath: string): { command: string; args: string[] } {
-	const normalized = path.resolve(adapterPath)
+function resolveAdapterPath(adapterPath: string): { resolvedPath: string | null; attemptedPaths: string[] } {
+	if (path.isAbsolute(adapterPath)) {
+		return {
+			resolvedPath: fs.existsSync(adapterPath) ? adapterPath : null,
+			attemptedPaths: [adapterPath],
+		}
+	}
+
+	const attemptedPaths = uniq(
+		[
+			path.resolve(process.cwd(), adapterPath),
+			path.resolve(process.cwd(), "public_pack", adapterPath),
+			path.resolve(process.cwd(), "Ballon_architecture", "balloon_mcp_server", adapterPath),
+			path.resolve(process.cwd(), "Ballon_architecture", "balloon_mcp_server", "public_pack", adapterPath),
+		],
+		8,
+	)
+	const resolvedPath = attemptedPaths.find((candidate) => fs.existsSync(candidate)) ?? null
+	return { resolvedPath, attemptedPaths }
+}
+
+function resolveAdapterCommand(resolvedPath: string): { command: string; args: string[] } {
+	const normalized = path.resolve(resolvedPath)
 	if (/\.(?:mjs|cjs|js)$/iu.test(normalized)) {
 		return { command: process.execPath, args: [normalized] }
 	}
@@ -201,7 +224,24 @@ export function runSemanticCara(packet: SemanticCaraPacket, config: SemanticCara
 
 	const startedAt = Date.now()
 	try {
-		const command = resolveAdapterCommand(config.adapterPath)
+		const adapterResolution = resolveAdapterPath(config.adapterPath)
+		if (!adapterResolution.resolvedPath) {
+			return {
+				...shadowResult(
+					packet,
+					config,
+					"error",
+					`Semantic adapter not found. Tried: ${adapterResolution.attemptedPaths.join(" | ")}`,
+				),
+				providerMeta: {
+					adapterPath: null,
+					requestedAdapterPath: config.adapterPath,
+					durationMs: Date.now() - startedAt,
+					source: "adapter",
+				},
+			}
+		}
+		const command = resolveAdapterCommand(adapterResolution.resolvedPath)
 		const completed = spawnSync(command.command, command.args, {
 			input: JSON.stringify(packet),
 			encoding: "utf8",
@@ -213,21 +253,21 @@ export function runSemanticCara(packet: SemanticCaraPacket, config: SemanticCara
 		if (completed.error) {
 			return {
 				...shadowResult(packet, config, "error", completed.error.message),
-				providerMeta: { adapterPath: config.adapterPath, durationMs, source: "adapter" },
+				providerMeta: { adapterPath: adapterResolution.resolvedPath, requestedAdapterPath: config.adapterPath, durationMs, source: "adapter" },
 			}
 		}
 		if ((completed.status ?? 0) !== 0) {
 			const stderrText = asString(completed.stderr) ?? `Semantic adapter exited with status ${completed.status ?? "unknown"}.`
 			return {
 				...shadowResult(packet, config, "error", stderrText),
-				providerMeta: { adapterPath: config.adapterPath, durationMs, source: "adapter" },
+				providerMeta: { adapterPath: adapterResolution.resolvedPath, requestedAdapterPath: config.adapterPath, durationMs, source: "adapter" },
 			}
 		}
 		const stdoutText = asString(completed.stdout)
 		if (!stdoutText) {
 			return {
 				...shadowResult(packet, config, "error", "Semantic adapter returned no JSON payload."),
-				providerMeta: { adapterPath: config.adapterPath, durationMs, source: "adapter" },
+				providerMeta: { adapterPath: adapterResolution.resolvedPath, requestedAdapterPath: config.adapterPath, durationMs, source: "adapter" },
 			}
 		}
 		const adapterPayload = parseAdapterPayload(stdoutText)
@@ -240,7 +280,8 @@ export function runSemanticCara(packet: SemanticCaraPacket, config: SemanticCara
 			correctionSummaryAddendum: adapterPayload.correctionSummaryAddendum ? cleanReply(adapterPayload.correctionSummaryAddendum) : null,
 			error: null,
 			providerMeta: {
-				adapterPath: config.adapterPath,
+				adapterPath: adapterResolution.resolvedPath,
+				requestedAdapterPath: config.adapterPath,
 				durationMs,
 				source: "adapter",
 			},
@@ -248,7 +289,7 @@ export function runSemanticCara(packet: SemanticCaraPacket, config: SemanticCara
 	} catch (error) {
 		return {
 			...shadowResult(packet, config, "error", error instanceof Error ? error.message : String(error)),
-			providerMeta: { adapterPath: config.adapterPath, durationMs: Date.now() - startedAt, source: "adapter" },
+			providerMeta: { adapterPath: config.adapterPath, requestedAdapterPath: config.adapterPath, durationMs: Date.now() - startedAt, source: "adapter" },
 		}
 	}
 }

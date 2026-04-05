@@ -44,6 +44,8 @@ Optional semantic CARA assist mode with an adapter:
 npm run balloon:mcp -- --semantic-cara-mode assist --semantic-cara-adapter .\examples\semantic_cara_adapter.example.mjs
 ```
 
+If your MCP host launches Balloon from a different working directory, the server now attempts a few package-relative resolutions for the example adapter path before failing.
+
 Note:
 
 1. shadow mode is the verified smoke-test path today
@@ -99,10 +101,10 @@ Before public export, do one pass as if you were a new user:
 1. open a fresh VS Code window
 2. use only the public README and this install guide
 3. start the server from `mcp.json`
-4. run the first demo without private explanation
+4. run the first demo without extra explanation
 5. write down every place where you had to guess
 
-If the install path still depends on private verbal guidance, the public surface is not ready yet.
+If the install path still depends on extra verbal guidance, the public surface is not ready yet.
 
 ## First Things To Try
 

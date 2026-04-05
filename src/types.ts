@@ -126,6 +126,7 @@ export interface SemanticCaraResult {
 	error: string | null
 	providerMeta: {
 		adapterPath: string | null
+		requestedAdapterPath?: string | null
 		durationMs: number
 		source: "shadow" | "adapter"
 	}

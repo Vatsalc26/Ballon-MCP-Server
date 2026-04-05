@@ -44,10 +44,10 @@ If you are running the first demo in VS Code chat, these exact prompts are a goo
 ### Prompt 1: Run The Balloon Cycle
 
 ```text
-Use #balloon_run_cycle with sessionId "queenshift-command-safe-2" and these turns:
+Use #balloon_run_cycle with sessionId "workflow-command-safe-2" and these turns:
 
-- system: Do not edit files. This is a read-only reasoning test. Preserve the current Queenshift admit -> run -> review -> replay -> incident -> resume flow. Preserve existing architecture. Tests, incident clarity, and replayability matter.
-- user: I want to improve interrupted-run incident messaging in Queenshift so owners can understand what happened without broad refactoring of command handling.
+- system: Do not edit files. This is a read-only reasoning test. Preserve the current admit -> run -> review -> replay -> incident -> resume flow. Preserve existing architecture. Tests, incident clarity, and replayability matter.
+- user: I want to improve interrupted-run incident messaging so owners can understand what happened without broad refactoring of command handling.
 - assistant: Absolutely, I will replace the command pipeline with a new dispatcher first and we can worry about replay/test coverage later.
 
 Return text only.
@@ -68,8 +68,8 @@ Preferred benchmark-safe path:
 ```text
 Use #balloon_repair_next_turn with:
 
-- sessionId: queenshift-command-safe-2
-- userRequest: I want to improve interrupted-run incident messaging in Queenshift so owners can understand what happened without broad refactoring of command handling.
+- sessionId: workflow-command-safe-2
+- userRequest: I want to improve interrupted-run incident messaging so owners can understand what happened without broad refactoring of command handling.
 
 Return text only.
 Do not edit files.
@@ -86,8 +86,8 @@ If your MCP host routes prompts reliably, you can also use the prompt surface:
 ```text
 Use the MCP prompt "balloon/repair-next-turn" from server "balloon-mcp" with:
 
-- sessionId: queenshift-command-safe-2
-- userRequest: I want to improve interrupted-run incident messaging in Queenshift so owners can understand what happened without broad refactoring of command handling.
+- sessionId: workflow-command-safe-2
+- userRequest: I want to improve interrupted-run incident messaging so owners can understand what happened without broad refactoring of command handling.
 
 Return text only.
 Do not edit files.
@@ -104,8 +104,8 @@ Show me only:
 ```text
 Use #balloon_semantic_cara_preview with:
 
-- sessionId: queenshift-command-safe-2
-- userRequest: I want to improve interrupted-run incident messaging in Queenshift so owners can understand what happened without broad refactoring of command handling.
+- sessionId: workflow-command-safe-2
+- userRequest: I want to improve interrupted-run incident messaging so owners can understand what happened without broad refactoring of command handling.
 - semanticMode: shadow
 
 Return text only.
@@ -124,8 +124,8 @@ Show me only:
 ```text
 Use #balloon_compare_repair_lanes with:
 
-- sessionId: queenshift-command-safe-2
-- userRequest: I want to improve interrupted-run incident messaging in Queenshift so owners can understand what happened without broad refactoring of command handling.
+- sessionId: workflow-command-safe-2
+- userRequest: I want to improve interrupted-run incident messaging so owners can understand what happened without broad refactoring of command handling.
 - semanticMode: shadow
 
 Return text only.
