@@ -53,7 +53,9 @@ The honest current state is:
 
 1. [Installation](./INSTALL.md)
 2. [Demo workflow](./DEMO_WORKFLOW.md)
-3. [Semantic CARA](./SEMANTIC_CARA.md)
-4. [Staged external Balloon](./STAGED_EXTERNAL_BALLOON.md)
-5. [Benchmark lanes](./BENCHMARK_LANES.md)
-6. [Roadmap](./ROADMAP.md)
+3. [Host compatibility](./HOST_COMPATIBILITY.md)
+4. [Latency and correction tax](./LATENCY_AND_CORRECTION_TAX.md)
+5. [Semantic CARA](./SEMANTIC_CARA.md)
+6. [Staged external Balloon](./STAGED_EXTERNAL_BALLOON.md)
+7. [Benchmark lanes](./BENCHMARK_LANES.md)
+8. [Roadmap](./ROADMAP.md)

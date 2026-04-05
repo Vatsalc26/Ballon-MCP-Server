@@ -56,6 +56,17 @@ See [../examples/claude_desktop_config.example.json](../examples/claude_desktop_
 
 For VS Code, create `.vscode/mcp.json` from [../examples/vscode_mcp.example.json](../examples/vscode_mcp.example.json).
 
+For other hosts:
+
+1. Cline starting config: [../examples/cline_mcp_settings.example.json](../examples/cline_mcp_settings.example.json)
+2. Roo Code starting config: [../examples/roo_mcp.example.json](../examples/roo_mcp.example.json)
+3. Claude Desktop-style starting config: [../examples/claude_desktop_config.example.json](../examples/claude_desktop_config.example.json)
+
+Host notes:
+
+1. [HOST_COMPATIBILITY.md](./HOST_COMPATIBILITY.md)
+2. [LATENCY_AND_CORRECTION_TAX.md](./LATENCY_AND_CORRECTION_TAX.md)
+
 You will usually need to adapt:
 
 1. `cwd`
@@ -126,3 +137,5 @@ If you want to experiment with the optional hybrid lane, read [SEMANTIC_CARA.md]
 If you want to inspect the staged external approximation, read [STAGED_EXTERNAL_BALLOON.md](./STAGED_EXTERNAL_BALLOON.md).
 
 If you want the four-lane comparison workflow, read [BENCHMARK_LANES.md](./BENCHMARK_LANES.md).
+
+If you want host-specific guidance beyond VS Code, read [HOST_COMPATIBILITY.md](./HOST_COMPATIBILITY.md).

@@ -173,10 +173,12 @@ If the demo feels good, the important part is not that Balloon produced more tex
 3. [Current readiness](./docs/READINESS.md)
 4. [Semantic CARA](./docs/SEMANTIC_CARA.md)
 5. [Staged external Balloon](./docs/STAGED_EXTERNAL_BALLOON.md)
-6. [Benchmark lanes](./docs/BENCHMARK_LANES.md)
-7. [Architecture roadmap](./docs/ROADMAP.md)
-8. [Contributing](./CONTRIBUTING.md)
-9. [Security policy](./SECURITY.md)
+6. [Host compatibility](./docs/HOST_COMPATIBILITY.md)
+7. [Latency and correction tax](./docs/LATENCY_AND_CORRECTION_TAX.md)
+8. [Benchmark lanes](./docs/BENCHMARK_LANES.md)
+9. [Architecture roadmap](./docs/ROADMAP.md)
+10. [Contributing](./CONTRIBUTING.md)
+11. [Security policy](./SECURITY.md)
 
 ## Good Fit
 
