@@ -1,7 +1,7 @@
 import fs from "fs"
 import path from "path"
 import crypto from "crypto"
-import type { BalloonGap, BalloonSessionSummary, BalloonTurn, MemoryLedgerItem, ProxyTrickle, StructuredProfile } from "./types"
+import type { BalloonGap, BalloonSessionSummary, BalloonTurn, MemoryLedgerItem, ProxyTrickle, ReleasePacket, StructuredProfile } from "./types"
 
 type DbRunResult = {
 	changes: number
@@ -77,6 +77,16 @@ CREATE TABLE IF NOT EXISTS balloon_memory_ledger (
 	updated_at TEXT NOT NULL,
 	PRIMARY KEY (session_id, item_key)
 );
+
+CREATE TABLE IF NOT EXISTS balloon_releases (
+	packet_id TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL,
+	packet_json TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_balloon_releases_session_created
+	ON balloon_releases(session_id, created_at DESC);
 `
 
 type SessionRow = {
@@ -110,6 +120,10 @@ type MemoryRow = {
 	count: number
 	last_reason: string
 	updated_at: string
+}
+
+type ReleaseRow = {
+	packet_json: string
 }
 
 type CountRow = {
@@ -380,6 +394,29 @@ export class BalloonStateStore {
 		}))
 	}
 
+	saveReleasePacket(packet: ReleasePacket): void {
+		this.ensureSession(packet.sessionId, packet.createdAt)
+		this.db
+			.prepare("INSERT INTO balloon_releases (packet_id, session_id, packet_json, created_at) VALUES (?, ?, ?, ?)")
+			.run(packet.packetId, packet.sessionId, JSON.stringify(packet), packet.createdAt)
+		this.touchSession(packet.sessionId, packet.createdAt)
+	}
+
+	getRecentReleasePackets(sessionId: string, limit = 10): ReleasePacket[] {
+		const rows = this.db
+			.prepare("SELECT packet_json FROM balloon_releases WHERE session_id = ? ORDER BY created_at DESC LIMIT ?")
+			.all(sessionId, limit) as ReleaseRow[]
+		return rows
+			.map((row) => {
+				try {
+					return JSON.parse(row.packet_json) as ReleasePacket
+				} catch {
+					return null
+				}
+			})
+			.filter((row): row is ReleasePacket => row !== null)
+	}
+
 	getSessionSummary(sessionId: string): BalloonSessionSummary | null {
 		const session = this.db.prepare("SELECT session_id, created_at, updated_at FROM balloon_sessions WHERE session_id = ?").get(sessionId) as
 			| SessionRow
@@ -391,12 +428,15 @@ export class BalloonStateStore {
 			(this.db.prepare("SELECT COUNT(*) AS count FROM balloon_trickles WHERE session_id = ?").get(sessionId) as CountRow | undefined)?.count ?? 0
 		const memoryCount =
 			(this.db.prepare("SELECT COUNT(*) AS count FROM balloon_memory_ledger WHERE session_id = ?").get(sessionId) as CountRow | undefined)?.count ?? 0
+		const releaseCount =
+			(this.db.prepare("SELECT COUNT(*) AS count FROM balloon_releases WHERE session_id = ?").get(sessionId) as CountRow | undefined)?.count ?? 0
 		return {
 			sessionId,
 			turnCount: Number(turnCount),
 			gapCount: Number(gapCount),
 			trickleCount: Number(trickleCount),
 			memoryCount: Number(memoryCount),
+			releaseCount: Number(releaseCount),
 			lastUpdatedAt: session.updated_at,
 		}
 	}

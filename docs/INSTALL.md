@@ -46,9 +46,9 @@ npm run balloon:mcp -- --semantic-cara-mode assist --semantic-cara-adapter .\exa
 
 Note:
 
-1. shadow mode is the verified smoke-test path today
-2. assist mode is implemented and has been verified in a direct local check
-3. MCP-hosted assist mode still depends on your host and local permissions allowing child-process execution
+1. shadow mode and assist mode are both covered in the current smoke verification path
+2. assist mode still depends on your host and local permissions allowing child-process execution
+3. the example adapter is intentionally simple and is meant as a contributor starting point, not the final semantic lane
 
 ## Connect From An MCP Host
 
@@ -111,11 +111,18 @@ If the install path still depends on extra verbal guidance, the public surface i
 3. `balloon_repair_next_turn`
 4. `balloon_semantic_cara_preview`
 5. `balloon_compare_repair_lanes`
-6. `balloon_review_session_drift`
-7. `balloon://sessions/{sessionId}/gaps`
+6. `balloon_run_staged_cycle`
+7. `balloon_compare_benchmark_lanes`
+8. `balloon_review_session_drift`
+9. `balloon://sessions/{sessionId}/gaps`
+10. `balloon://sessions/{sessionId}/releases`
 
 If prompt invocation is inconsistent in your MCP host, prefer `balloon_repair_next_turn` for repeatable demos and benchmark runs.
 
 If you want the review prompt behavior without relying on prompt routing, prefer `balloon_review_session_drift`.
 
 If you want to experiment with the optional hybrid lane, read [SEMANTIC_CARA.md](./SEMANTIC_CARA.md).
+
+If you want to inspect the staged external approximation, read [STAGED_EXTERNAL_BALLOON.md](./STAGED_EXTERNAL_BALLOON.md).
+
+If you want the four-lane comparison workflow, read [BENCHMARK_LANES.md](./BENCHMARK_LANES.md).

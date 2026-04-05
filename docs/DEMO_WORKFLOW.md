@@ -36,6 +36,8 @@ Then inspect:
 4. the repair path: `balloon/repair-next-turn` or `balloon_repair_next_turn`
 5. the optional hybrid lane: `balloon_semantic_cara_preview`
 6. the side-by-side lane comparison: `balloon_compare_repair_lanes`
+7. the staged external prototype: `balloon_run_staged_cycle`
+8. the benchmark-safe four-lane comparison: `balloon_compare_benchmark_lanes`
 
 ## Host-Tested Demo Prompts
 
@@ -140,6 +142,49 @@ Show me only:
 4. the lane delta
 ```
 
+### Prompt 5: Run The Staged External Prototype
+
+```text
+Use #balloon_run_staged_cycle with:
+
+- sessionId: workflow-command-safe-2
+- userRequest: I want to improve interrupted-run incident messaging so owners can understand what happened without broad refactoring of command handling.
+- forceStageCount: 3
+
+Return text only.
+Do not edit files.
+Do not apply patches.
+Do not run terminal commands.
+
+Show me only:
+1. the active stages
+2. the release packet summary
+3. the deterministic repaired reply
+4. the staged external reply
+```
+
+### Prompt 6: Compare All Benchmark Lanes
+
+```text
+Use #balloon_compare_benchmark_lanes with:
+
+- sessionId: workflow-command-safe-2
+- userRequest: I want to improve interrupted-run incident messaging so owners can understand what happened without broad refactoring of command handling.
+- forceStageCount: 3
+
+Return text only.
+Do not edit files.
+Do not apply patches.
+Do not run terminal commands.
+
+Show me only:
+1. the baseline reply
+2. the deterministic Balloon reply
+3. the assist Balloon reply
+4. the staged external Balloon reply
+5. the lane delta
+```
+
 ## Expected Outcome
 
 At minimum, the demonstration should surface:
@@ -147,6 +192,7 @@ At minimum, the demonstration should surface:
 1. architecture drift
 2. hidden requirement omissions
 3. a non-overriding corrective payload
+4. a staged reply that stays bounded while making released corrections visible
 
 ## What Good Looks Like
 
@@ -160,6 +206,8 @@ It is one where the system becomes more disciplined:
 4. it turns those findings into a smaller next-step correction rather than a broad replacement answer
 
 Another good sign is that the repaired reply sounds more disciplined than the drifted one. It should preserve the earlier direction without sounding like a full override.
+
+If you run the staged and benchmark tools, another good sign is that the staged reply remains bounded while pulling in the most relevant released corrections instead of dumping every remembered instruction back into the next step.
 
 If the prompt path is flaky in your host, prefer the fallback tool for repeatable demos and benchmarks.
 

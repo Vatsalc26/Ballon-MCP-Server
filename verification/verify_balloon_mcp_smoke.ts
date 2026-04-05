@@ -23,12 +23,15 @@ type SmokeResult = {
 	semanticCaraPreviewWorked: boolean
 	semanticCaraAssistWorked: boolean
 	compareRepairLanesWorked: boolean
+	stagedCycleWorked: boolean
+	benchmarkLaneCompareWorked: boolean
 	reviewDriftFallbackWorked: boolean
 	profileBuilt: boolean
 	gapAuditWorked: boolean
 	trickleGenerated: boolean
 	memoryLedgerUpdated: boolean
 	resourceReadWorked: boolean
+	releaseResourceWorked: boolean
 	details: string[]
 	stderr: string
 }
@@ -44,8 +47,12 @@ function resolveRootDir(): string {
 	throw new Error(`Could not resolve repo root from ${__dirname}`)
 }
 
+function resolveVerificationDir(rootDir: string): string {
+	return path.join(rootDir, "verification")
+}
+
 function createTempDataDir(rootDir: string): string {
-	const dir = path.join(rootDir, "verification", `.tmp-balloon-mcp-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+	const dir = path.join(resolveVerificationDir(rootDir), `.tmp-balloon-mcp-${Date.now()}-${Math.random().toString(16).slice(2)}`)
 	fs.mkdirSync(dir, { recursive: true })
 	return dir
 }
@@ -224,6 +231,8 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			hasTool(toolsList, "balloon_repair_next_turn") &&
 			hasTool(toolsList, "balloon_semantic_cara_preview") &&
 			hasTool(toolsList, "balloon_compare_repair_lanes") &&
+			hasTool(toolsList, "balloon_run_staged_cycle") &&
+			hasTool(toolsList, "balloon_compare_benchmark_lanes") &&
 			hasTool(toolsList, "balloon_review_session_drift")
 		details.push(`toolSurfacePassed=${toolSurfacePassed ? "yes" : "no"}`)
 
@@ -348,6 +357,53 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			compareRepairLanes.structuredContent?.semanticCara?.status === "shadow"
 		details.push(`compareRepairLanesWorked=${compareRepairLanesWorked ? "yes" : "no"}`)
 
+		const stagedCycle = (await client.request("tools/call", {
+			name: "balloon_run_staged_cycle",
+			arguments: {
+				sessionId: `${sessionId}-hero`,
+				userRequest: latestUserRequest,
+				forceStageCount: 3,
+			},
+		})) as {
+			structuredContent?: {
+				activeStageCount?: number
+				stagedReply?: string
+				releasePacket?: { released?: Array<{ sourceText?: string }> }
+			}
+		}
+		const stagedCycleWorked =
+			(stagedCycle.structuredContent?.activeStageCount ?? 0) === 3 &&
+			Boolean(stagedCycle.structuredContent?.stagedReply?.includes("I would")) &&
+			(stagedCycle.structuredContent?.releasePacket?.released?.length ?? 0) >= 1
+		details.push(`stagedCycleWorked=${stagedCycleWorked ? "yes" : "no"}`)
+
+		const benchmarkLaneCompare = (await client.request("tools/call", {
+			name: "balloon_compare_benchmark_lanes",
+			arguments: {
+				sessionId: `${sessionId}-hero`,
+				userRequest: latestUserRequest,
+				semanticAdapterPath: "./examples/semantic_cara_adapter.example.mjs",
+				forceStageCount: 3,
+			},
+		})) as {
+			structuredContent?: {
+				baselineReply?: string
+				deterministicReply?: string
+				assistReply?: string
+				stagedReply?: string
+				assistSemanticCara?: { status?: string }
+				stagedActiveStageCount?: number
+			}
+		}
+		const benchmarkLaneCompareWorked =
+			Boolean(benchmarkLaneCompare.structuredContent?.baselineReply?.includes("Absolutely")) &&
+			Boolean(benchmarkLaneCompare.structuredContent?.deterministicReply?.includes("I would")) &&
+			Boolean(benchmarkLaneCompare.structuredContent?.assistReply?.includes("I would")) &&
+			Boolean(benchmarkLaneCompare.structuredContent?.stagedReply?.includes("I would")) &&
+			benchmarkLaneCompare.structuredContent?.assistSemanticCara?.status === "assisted" &&
+			benchmarkLaneCompare.structuredContent?.stagedActiveStageCount === 3
+		details.push(`benchmarkLaneCompareWorked=${benchmarkLaneCompareWorked ? "yes" : "no"}`)
+
 		const reviewDriftFallback = (await client.request("tools/call", {
 			name: "balloon_review_session_drift",
 			arguments: { sessionId: `${sessionId}-hero` },
@@ -404,12 +460,22 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 		details.push(`memoryLedgerUpdated=${memoryLedgerUpdated ? "yes" : "no"}`)
 
 		const resources = (await client.request("resources/list", {})) as { resources?: Array<{ uri?: string }> }
-		const profileUri = Array.isArray(resources.resources) ? resources.resources.find((resource) => resource?.uri?.endsWith("/profile"))?.uri : undefined
+		const profileUri = Array.isArray(resources.resources)
+			? resources.resources.find((resource) => resource?.uri?.includes(sessionId) && resource?.uri?.endsWith("/profile"))?.uri
+			: undefined
+		const releasesUri = Array.isArray(resources.resources)
+			? resources.resources.find((resource) => resource?.uri?.includes(`${sessionId}-hero`) && resource?.uri?.endsWith("/releases"))?.uri
+			: undefined
 		const resourceRead = profileUri
 			? ((await client.request("resources/read", { uri: profileUri })) as { contents?: Array<{ text?: string }> })
 			: null
+		const releaseResource = releasesUri
+			? ((await client.request("resources/read", { uri: releasesUri })) as { contents?: Array<{ text?: string }> })
+			: null
 		const resourceReadWorked = Boolean(resourceRead?.contents?.[0]?.text?.includes(sessionId))
 		details.push(`resourceReadWorked=${resourceReadWorked ? "yes" : "no"}`)
+		const releaseResourceWorked = Boolean(releaseResource?.contents?.[0]?.text?.includes("\"packetId\""))
+		details.push(`releaseResourceWorked=${releaseResourceWorked ? "yes" : "no"}`)
 
 		return {
 			initializePassed,
@@ -420,12 +486,15 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			semanticCaraPreviewWorked,
 			semanticCaraAssistWorked,
 			compareRepairLanesWorked,
+			stagedCycleWorked,
+			benchmarkLaneCompareWorked,
 			reviewDriftFallbackWorked,
 			profileBuilt,
 			gapAuditWorked,
 			trickleGenerated,
 			memoryLedgerUpdated,
 			resourceReadWorked,
+			releaseResourceWorked,
 			details,
 			stderr: client.stderr.trim(),
 		}
@@ -445,12 +514,15 @@ export function formatBalloonMcpSmoke(result: SmokeResult): string {
 		`Semantic CARA preview: ${result.semanticCaraPreviewWorked ? "PASS" : "FAIL"}`,
 		`Semantic CARA assist: ${result.semanticCaraAssistWorked ? "PASS" : "FAIL"}`,
 		`Compare repair lanes: ${result.compareRepairLanesWorked ? "PASS" : "FAIL"}`,
+		`Staged cycle: ${result.stagedCycleWorked ? "PASS" : "FAIL"}`,
+		`Benchmark lane compare: ${result.benchmarkLaneCompareWorked ? "PASS" : "FAIL"}`,
 		`Review drift fallback: ${result.reviewDriftFallbackWorked ? "PASS" : "FAIL"}`,
 		`Profile build: ${result.profileBuilt ? "PASS" : "FAIL"}`,
 		`Gap audit: ${result.gapAuditWorked ? "PASS" : "FAIL"}`,
 		`Proxy trickle: ${result.trickleGenerated ? "PASS" : "FAIL"}`,
 		`Memory ledger: ${result.memoryLedgerUpdated ? "PASS" : "FAIL"}`,
 		`Resource read: ${result.resourceReadWorked ? "PASS" : "FAIL"}`,
+		`Release resource: ${result.releaseResourceWorked ? "PASS" : "FAIL"}`,
 		...(result.details.length > 0 ? ["Details:", ...result.details.map((detail) => `- ${detail}`)] : []),
 		...(result.stderr ? ["Stderr:", result.stderr] : []),
 	].join("\n")
@@ -468,12 +540,15 @@ async function main(): Promise<void> {
 			result.semanticCaraPreviewWorked &&
 			result.semanticCaraAssistWorked &&
 			result.compareRepairLanesWorked &&
+			result.stagedCycleWorked &&
+			result.benchmarkLaneCompareWorked &&
 			result.reviewDriftFallbackWorked &&
 			result.profileBuilt &&
 			result.gapAuditWorked &&
 			result.trickleGenerated &&
 			result.memoryLedgerUpdated &&
-			result.resourceReadWorked
+			result.resourceReadWorked &&
+			result.releaseResourceWorked
 			? 0
 			: 1,
 	)

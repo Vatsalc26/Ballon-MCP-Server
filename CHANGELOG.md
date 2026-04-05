@@ -14,6 +14,12 @@ All notable public changes to Balloon MCP should be recorded in this file.
 8. clarified lane comparison output so reply changes and semantic-signal changes are distinguished
 9. improved the example semantic adapter so assist-mode repairs preserve protected areas, architecture wording, verification obligations, and bounded next-step quality more explicitly
 10. scrubbed public docs/examples so the standalone repo no longer uses internal-layout language
+11. added similarity-gated release packets so memory and trickle corrections are surfaced selectively instead of all at once
+12. added `balloon_run_staged_cycle` as the first staged multi-balloon external prototype
+13. added `balloon_compare_benchmark_lanes` for `baseline / deterministic / assist / staged` comparison in one tool call
+14. added `balloon://sessions/{sessionId}/releases` so release packets are inspectable through MCP resources
+15. expanded the smoke verifier to cover staged-cycle and four-lane benchmark tooling
+16. added public docs/examples for the staged external lane and four-lane benchmark workflow
 
 ## 0.1.0-alpha.0 - 2026-04-05
 

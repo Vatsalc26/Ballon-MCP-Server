@@ -42,6 +42,8 @@ Balloon MCP helps a host application:
 4. retrieve only the most relevant anchors
 5. generate a low-volume, non-overriding proxy trickle
 6. reinforce recurring context in a memory ledger
+7. release similarity-matched corrections from memory and trickle into the next step
+8. run a staged external prototype with early, mid, and deep Balloon passes
 
 By design, the server returns analysis artifacts and corrective context. It does not patch your repo by itself.
 
@@ -54,9 +56,23 @@ That means:
 1. deterministic Balloon stays the stable benchmark anchor
 2. semantic CARA can be enabled as a shadow or assist mode
 3. developers can plug in their own model-backed adapter without changing the core server
-4. shadow mode is verified in the current smoke path, and assist mode is implemented and works when the host allows adapter process execution
+4. shadow mode and assist mode are both in the current smoke path
+5. assist mode still depends on the host allowing adapter process execution
 
 See [docs/SEMANTIC_CARA.md](./docs/SEMANTIC_CARA.md).
+
+## Staged External Prototype
+
+Balloon now also includes a first staged external prototype.
+
+That staged lane is still honest about the MCP boundary:
+
+1. it is an external approximation, not hidden-state access
+2. it runs early, mid, and deep Balloon stages in the open
+3. it uses similarity-gated release to decide which memory/trickle corrections should stay visible in the next step
+4. it gives us a fourth benchmark lane beyond baseline, deterministic, and assist
+
+See [docs/STAGED_EXTERNAL_BALLOON.md](./docs/STAGED_EXTERNAL_BALLOON.md).
 
 ## Why It Feels Different
 
@@ -102,9 +118,11 @@ Tools:
 7. `balloon_repair_next_turn`
 8. `balloon_semantic_cara_preview`
 9. `balloon_compare_repair_lanes`
-10. `balloon_review_session_drift`
-11. `balloon_update_memory_ledger`
-12. `balloon_explain_gap_report`
+10. `balloon_run_staged_cycle`
+11. `balloon_compare_benchmark_lanes`
+12. `balloon_review_session_drift`
+13. `balloon_update_memory_ledger`
+14. `balloon_explain_gap_report`
 
 Prompts:
 
@@ -118,6 +136,7 @@ Resources:
 3. `balloon://sessions/{sessionId}/gaps`
 4. `balloon://sessions/{sessionId}/trickles`
 5. `balloon://sessions/{sessionId}/memory`
+6. `balloon://sessions/{sessionId}/releases`
 
 ## Getting Started
 
@@ -141,6 +160,10 @@ If you want the drift-review prompt without relying on prompt routing, use `ball
 
 If you want to compare deterministic vs hybrid repair output directly, use `balloon_compare_repair_lanes`.
 
+If you want the staged external approximation without depending on prompt routing, use `balloon_run_staged_cycle`.
+
+If you want the benchmark-safe four-lane comparison, use `balloon_compare_benchmark_lanes`.
+
 If the demo feels good, the important part is not that Balloon produced more text. The important part is that it preserved the existing direction and pushed the next reply back toward the user's real constraints.
 
 ## Documentation
@@ -148,9 +171,11 @@ If the demo feels good, the important part is not that Balloon produced more tex
 1. [Installation](./docs/INSTALL.md)
 2. [Demo workflow](./docs/DEMO_WORKFLOW.md)
 3. [Semantic CARA](./docs/SEMANTIC_CARA.md)
-4. [Architecture roadmap](./docs/ROADMAP.md)
-5. [Contributing](./CONTRIBUTING.md)
-6. [Security policy](./SECURITY.md)
+4. [Staged external Balloon](./docs/STAGED_EXTERNAL_BALLOON.md)
+5. [Benchmark lanes](./docs/BENCHMARK_LANES.md)
+6. [Architecture roadmap](./docs/ROADMAP.md)
+7. [Contributing](./CONTRIBUTING.md)
+8. [Security policy](./SECURITY.md)
 
 ## Good Fit
 

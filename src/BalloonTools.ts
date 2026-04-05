@@ -1,8 +1,19 @@
-import type { BalloonGap, BalloonSessionSummary, HiddenRequirement, ProxyTrickle, RetrievalHit, SemanticCaraResult, StructuredProfile } from "./types"
+import type {
+	BalloonGap,
+	BalloonSessionSummary,
+	HiddenRequirement,
+	ProxyTrickle,
+	ReleasePacket,
+	RetrievalHit,
+	SemanticCaraResult,
+	StagedBalloonResult,
+	StructuredProfile,
+} from "./types"
 import { BalloonStateStore } from "./BalloonStateStore"
 import { auditLatestTurn, buildProxyTrickle, buildStructuredProfile, detectHiddenRequirements, retrieveRelevantTurns, summarizeMemoryPromotion } from "./BalloonAnalysis"
 import { buildBalloonRepairBundle } from "./BalloonRepair"
 import { buildReviewPromptBundle } from "./BalloonPrompts"
+import { buildStagedBalloonResult } from "./BalloonStaged"
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 type JsonRecord = Record<string, unknown>
@@ -116,6 +127,60 @@ function formatTrickle(trickle: ProxyTrickle): string {
 	return [trickle.summary, "", trickle.deliveryText].join("\n")
 }
 
+function formatReleasePacket(packet: ReleasePacket): string {
+	const releasedLines =
+		packet.released.length > 0
+			? packet.released
+					.slice(0, 6)
+					.map((item, index) => `${index + 1}. ${item.sourceText} [${item.sourceKind}, score=${item.similarityScore.toFixed(2)}, threshold=${item.threshold.toFixed(2)}]`)
+			: ["No released corrections."]
+	const heldLines =
+		packet.held.length > 0
+			? packet.held
+					.slice(0, 4)
+					.map((item, index) => `${index + 1}. ${item.sourceText} [${item.sourceKind}, score=${item.similarityScore.toFixed(2)}, threshold=${item.threshold.toFixed(2)}]`)
+			: ["No held corrections."]
+	return [
+		packet.summary,
+		"",
+		packet.deliveryText,
+		"",
+		"Released corrections",
+		...releasedLines,
+		"",
+		"Held corrections",
+		...heldLines,
+	].join("\n")
+}
+
+function formatStagedResult(result: StagedBalloonResult): string {
+	const stageLines = result.stages.map((stage) =>
+		[
+			`${stage.label}: ${stage.active ? "active" : "inactive"}`,
+			`Reason: ${stage.reason}`,
+			`Summary: ${stage.stageSummary}`,
+			stage.trickleInstructions.length > 0 ? `Instructions: ${stage.trickleInstructions.join(" | ")}` : "Instructions: none",
+		].join("\n"),
+	)
+	return [
+		`Turn count: ${result.turnCount}`,
+		`Thresholds: ${result.thresholds.join(", ")}`,
+		`Forced stage count: ${result.forcedStageCount ?? "none"}`,
+		`Active stages: ${result.activeStageCount}`,
+		"",
+		...stageLines,
+		"",
+		"Deterministic reply",
+		result.deterministicReply,
+		"",
+		"Staged external reply",
+		result.stagedReply,
+		"",
+		"Release packet",
+		formatReleasePacket(result.releasePacket),
+	].join("\n")
+}
+
 function formatSemanticCara(result: SemanticCaraResult): string {
 	if (result.status === "disabled") return "Semantic CARA disabled."
 	const lines = [
@@ -161,6 +226,7 @@ function formatSessionSummary(summary: BalloonSessionSummary): string {
 		`Gaps: ${summary.gapCount}`,
 		`Trickles: ${summary.trickleCount}`,
 		`Memory items: ${summary.memoryCount}`,
+		`Release packets: ${summary.releaseCount}`,
 		`Last updated: ${summary.lastUpdatedAt ?? "unknown"}`,
 	].join("\n")
 }
@@ -484,6 +550,7 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					hiddenRequirements: bundle.hiddenRequirements,
 					gaps: bundle.gaps,
 					trickle: bundle.trickle,
+					releasePacket: bundle.releasePacket,
 					nextTurnStance: bundle.nextTurnStance,
 					deterministicReply: bundle.deterministicReply,
 					repairedReply: bundle.repairedReply,
@@ -544,6 +611,7 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					profile: bundle.profile,
 					gaps: bundle.gaps,
 					hiddenRequirements: bundle.hiddenRequirements,
+					releasePacket: bundle.releasePacket,
 					nextTurnStance: bundle.nextTurnStance,
 					deterministicReply: bundle.deterministicReply,
 					repairedReply: bundle.repairedReply,
@@ -626,6 +694,7 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					profile: hybrid.profile,
 					gaps: hybrid.gaps,
 					hiddenRequirements: hybrid.hiddenRequirements,
+					releasePacket: hybrid.releasePacket,
 					nextTurnStance: hybrid.nextTurnStance,
 					deterministicReply: deterministic.repairedReply,
 					deterministicCorrectionSummary: deterministic.correctionSummary,
@@ -638,6 +707,172 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					semanticCaraConfig: hybrid.semanticCaraConfig,
 					semanticCara: hybrid.semanticCara,
 					promptMessages: hybrid.messages,
+				})
+			},
+		},
+		{
+			name: "balloon_run_staged_cycle",
+			title: "Run Staged Balloon Cycle",
+			description: "Runs the first staged multi-balloon external prototype with early, mid, and deep stages plus similarity-gated release.",
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["sessionId"],
+				properties: {
+					sessionId: { type: "string", description: "Stable Balloon session id." },
+					turns: {
+						type: "array",
+						description: "Optional turns to replace or append before running the staged cycle.",
+						items: {
+							type: "object",
+							required: ["role", "content"],
+							properties: {
+								role: { type: "string", enum: ["user", "assistant", "system"] },
+								content: { type: "string" },
+								timestamp: { type: "string" },
+							},
+						},
+					},
+					mergeMode: { type: "string", enum: ["replace", "append"], description: "Whether provided turns replace or append." },
+					userRequest: { type: "string", description: "Optional explicit user request to repair against." },
+					latestResponse: { type: "string", description: "Optional explicit latest assistant response to audit before building the staged cycle." },
+					stageThresholds: { type: "array", description: "Optional turn thresholds for early, mid, and deep stages.", items: { type: "number" } },
+					forceStageCount: { type: "number", description: "Optional override to force 1-3 stages active for demos or benchmarks." },
+					semanticMode: { type: "string", enum: ["off", "shadow", "assist"], description: "Optional semantic mode forwarded to the repair bundle." },
+					semanticAdapterPath: { type: "string", description: "Optional semantic adapter path for assist mode." },
+					semanticTimeoutMs: { type: "number", description: "Optional semantic adapter timeout in milliseconds." },
+					semanticMaxNotes: { type: "number", description: "Optional cap on semantic notes returned." },
+				},
+			},
+			run: (args, context) => {
+				const sessionId = asString(args.sessionId)
+				if (!sessionId) return toolError("sessionId is required.")
+				const incomingTurns = asTurns(args.turns)
+				if (incomingTurns.length > 0) {
+					const mergeMode = asString(args.mergeMode) === "append" ? "append" : "replace"
+					if (mergeMode === "replace") context.store.replaceTurns(sessionId, incomingTurns)
+					else context.store.appendTurns(sessionId, incomingTurns)
+				}
+				const staged = buildStagedBalloonResult(context.store, sessionId, {
+					userRequest: asString(args.userRequest) ?? undefined,
+					latestResponse: asString(args.latestResponse) ?? undefined,
+					semanticMode: args.semanticMode,
+					semanticAdapterPath: args.semanticAdapterPath,
+					semanticTimeoutMs: args.semanticTimeoutMs,
+					semanticMaxNotes: args.semanticMaxNotes,
+					stageThresholds: args.stageThresholds,
+					forceStageCount: args.forceStageCount,
+				})
+				if (!staged) return toolError(`Could not build a staged Balloon cycle for session ${sessionId}.`)
+				const text = ["Balloon staged cycle complete.", "", formatStagedResult(staged)].join("\n")
+				return textResult(text, {
+					sessionId,
+					turnCount: staged.turnCount,
+					thresholds: staged.thresholds,
+					forcedStageCount: staged.forcedStageCount,
+					activeStageCount: staged.activeStageCount,
+					stages: staged.stages,
+					releasePacket: staged.releasePacket,
+					deterministicReply: staged.deterministicReply,
+					stagedReply: staged.stagedReply,
+					deterministicCorrectionSummary: staged.deterministicCorrectionSummary,
+					stagedCorrectionSummary: staged.stagedCorrectionSummary,
+				})
+			},
+		},
+		{
+			name: "balloon_compare_benchmark_lanes",
+			title: "Compare Benchmark Lanes",
+			description: "Compares baseline, deterministic Balloon, assist Balloon, and staged external Balloon lanes for the same session.",
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["sessionId"],
+				properties: {
+					sessionId: { type: "string", description: "Stable Balloon session id." },
+					userRequest: { type: "string", description: "Optional explicit user request to repair against." },
+					latestResponse: { type: "string", description: "Optional explicit latest assistant response to audit before building the comparison." },
+					semanticAdapterPath: { type: "string", description: "Optional semantic adapter path for the assist lane." },
+					semanticTimeoutMs: { type: "number", description: "Optional semantic adapter timeout in milliseconds." },
+					semanticMaxNotes: { type: "number", description: "Optional cap on semantic notes returned." },
+					forceStageCount: { type: "number", description: "Optional override to force staged-lane depth. Defaults to 3 for short benchmark scenarios." },
+					stageThresholds: { type: "array", description: "Optional staged-lane thresholds.", items: { type: "number" } },
+				},
+			},
+			run: (args, context) => {
+				const sessionId = asString(args.sessionId)
+				if (!sessionId) return toolError("sessionId is required.")
+				const baseline = buildBalloonRepairBundle(context.store, sessionId, {
+					userRequest: asString(args.userRequest) ?? undefined,
+					latestResponse: asString(args.latestResponse) ?? undefined,
+					semanticMode: "off",
+				})
+				if (!baseline) return toolError(`Could not build the benchmark comparison for session ${sessionId}.`)
+				const assist = buildBalloonRepairBundle(context.store, sessionId, {
+					userRequest: asString(args.userRequest) ?? undefined,
+					latestResponse: asString(args.latestResponse) ?? undefined,
+					semanticMode: "assist",
+					semanticAdapterPath: args.semanticAdapterPath,
+					semanticTimeoutMs: args.semanticTimeoutMs,
+					semanticMaxNotes: args.semanticMaxNotes,
+				})
+				if (!assist) return toolError(`Could not build the assist lane for session ${sessionId}.`)
+				const staged = buildStagedBalloonResult(context.store, sessionId, {
+					userRequest: asString(args.userRequest) ?? undefined,
+					latestResponse: asString(args.latestResponse) ?? undefined,
+					forceStageCount: args.forceStageCount ?? 3,
+					stageThresholds: args.stageThresholds,
+				})
+				if (!staged) return toolError(`Could not build the staged lane for session ${sessionId}.`)
+				const baselineReply = baseline.latestResponse ?? "(no latest assistant response found)"
+				const baselineDiffers = baselineReply.trim() !== baseline.repairedReply.trim()
+				const assistDiffers = assist.repairedReply.trim() !== baseline.repairedReply.trim()
+				const stagedDiffers = staged.stagedReply.trim() !== baseline.repairedReply.trim()
+				const text = [
+					"Balloon benchmark lane comparison ready.",
+					"",
+					"Baseline reply",
+					baselineReply,
+					"",
+					"Deterministic Balloon",
+					baseline.repairedReply,
+					"",
+					"Assist Balloon",
+					assist.repairedReply,
+					"",
+					"Staged external Balloon",
+					staged.stagedReply,
+					"",
+					"Lane deltas",
+					`Baseline differs from deterministic: ${baselineDiffers ? "yes" : "no"}`,
+					`Assist differs from deterministic: ${assistDiffers ? "yes" : "no"}`,
+					`Staged differs from deterministic: ${stagedDiffers ? "yes" : "no"}`,
+					`Assist semantic status: ${assist.semanticCara.status}`,
+					`Staged active stages: ${staged.activeStageCount}`,
+					"",
+					"Staged release packet",
+					formatReleasePacket(staged.releasePacket),
+				].join("\n")
+				return textResult(text, {
+					sessionId,
+					requestText: baseline.requestText,
+					latestResponse: baseline.latestResponse,
+					baselineReply,
+					deterministicReply: baseline.repairedReply,
+					assistReply: assist.repairedReply,
+					stagedReply: staged.stagedReply,
+					deterministicCorrectionSummary: baseline.correctionSummary,
+					assistCorrectionSummary: assist.correctionSummary,
+					stagedCorrectionSummary: staged.stagedCorrectionSummary,
+					baselineDiffers,
+					assistDiffers,
+					stagedDiffers,
+					assistSemanticCara: assist.semanticCara,
+					assistReleasePacket: assist.releasePacket,
+					stagedReleasePacket: staged.releasePacket,
+					stagedActiveStageCount: staged.activeStageCount,
+					stagedThresholds: staged.thresholds,
+					stagedStages: staged.stages,
 				})
 			},
 		},
@@ -779,11 +1014,18 @@ export function listBalloonResources(store: BalloonStateStore): ResourceDefiniti
 			description: "Earned-memory proxy ledger entries.",
 			mimeType: "application/json",
 		},
+		{
+			uri: `balloon://sessions/${summary.sessionId}/releases`,
+			name: `${summary.sessionId}-releases`,
+			title: `Balloon Release Ledger (${summary.sessionId})`,
+			description: "Recent similarity-gated release packets.",
+			mimeType: "application/json",
+		},
 	])
 }
 
 export function readBalloonResource(store: BalloonStateStore, uri: string): ResourceContent | null {
-	const match = /^balloon:\/\/sessions\/([^/]+)\/(summary|profile|gaps|trickles|memory)$/u.exec(uri)
+	const match = /^balloon:\/\/sessions\/([^/]+)\/(summary|profile|gaps|trickles|memory|releases)$/u.exec(uri)
 	if (!match) return null
 	const sessionId = match[1] ?? ""
 	const resourceName = match[2] ?? ""
@@ -804,6 +1046,8 @@ export function readBalloonResource(store: BalloonStateStore, uri: string): Reso
 			return { uri, mimeType: "application/json", text: JSON.stringify(store.getRecentTrickles(sessionId, 20), null, 2) }
 		case "memory":
 			return { uri, mimeType: "application/json", text: JSON.stringify(store.getMemoryLedger(sessionId), null, 2) }
+		case "releases":
+			return { uri, mimeType: "application/json", text: JSON.stringify(store.getRecentReleasePackets(sessionId, 20), null, 2) }
 		default:
 			return null
 	}

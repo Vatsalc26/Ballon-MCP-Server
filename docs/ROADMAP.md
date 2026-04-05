@@ -18,7 +18,9 @@ Today it provides:
 3. targeted retrieval of only the most relevant prior anchors
 4. proxy trickle as low-volume corrective pressure on the next turn
 5. memory-ledger reinforcement for recurring constraints
-6. MCP tools, prompts, and resources that expose those artifacts visibly
+6. similarity-gated release from memory and trickle
+7. a first staged multi-balloon external prototype
+8. MCP tools, prompts, and resources that expose those artifacts visibly
 
 This is already useful because it makes one painful failure mode visible:
 
@@ -78,17 +80,18 @@ In short:
 The next useful steps are:
 
 1. stronger prompt-routing and host-surface reliability
-2. a first Balloon-vs-baseline evaluation pass on realistic long-session tasks
+2. deeper Balloon-vs-baseline evaluation on realistic long-session tasks
 3. cleaner repaired replies and better demo quality
 4. cleaner public examples and install paths
 5. bounded repo-aware grounding only where it materially improves CARA
-6. an optional hybrid semantic CARA lane layered on top of the deterministic base
+6. stronger semantic assist quality so the hybrid lane earns default status where it helps
+7. better host adapters and host-specific UX guidance
 
 ## Medium-Term Roadmap
 
 After the alpha is stable, the next layer should focus on:
 
-1. multi-balloon external prototypes
+1. stronger staged-balloon behavior across longer sessions
 2. better gap scoring and ranking
 3. stronger similarity-gated release behavior
 4. evaluation on longer coding sessions
@@ -117,14 +120,16 @@ The fastest credible path is a 2-lane build:
 Current state inside that strategy:
 
 1. the deterministic base is already the benchmark anchor
-2. semantic CARA `shadow` mode is the first verified hybrid step
-3. semantic CARA `assist` mode is the adapter-backed experimental step
+2. semantic CARA `shadow` mode is a verified inspection step
+3. semantic CARA `assist` mode is an adapter-backed benchmark lane
+4. the staged external prototype is the first fuller external-approximation lane
 
 That lets the project compare:
 
 1. baseline
 2. deterministic Balloon
 3. hybrid Balloon
+4. staged external Balloon
 
 without losing clarity on cost, latency, or what actually improved.
 

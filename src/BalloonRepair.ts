@@ -1,7 +1,18 @@
 import { auditLatestTurn, buildProxyTrickle, buildStructuredProfile, detectHiddenRequirements, retrieveRelevantTurns } from "./BalloonAnalysis"
+import { buildReleasePacket, extractReleasedGuidance } from "./BalloonRelease"
 import { mergeSemanticRepair, resolveSemanticCaraConfig, runSemanticCara } from "./BalloonSemanticCARA"
 import { BalloonStateStore } from "./BalloonStateStore"
-import type { BalloonGap, HiddenRequirement, MemoryLedgerItem, ProxyTrickle, SemanticCaraConfig, SemanticCaraPacket, SemanticCaraResult, StructuredProfile } from "./types"
+import type {
+	BalloonGap,
+	HiddenRequirement,
+	MemoryLedgerItem,
+	ProxyTrickle,
+	ReleasePacket,
+	SemanticCaraConfig,
+	SemanticCaraPacket,
+	SemanticCaraResult,
+	StructuredProfile,
+} from "./types"
 
 export type RepairPromptMessage = {
 	role: "user" | "assistant" | "system"
@@ -21,6 +32,7 @@ export type BalloonRepairBundle = {
 	gaps: BalloonGap[]
 	trickle: ProxyTrickle | null
 	memory: MemoryLedgerItem[]
+	releasePacket: ReleasePacket
 	nextTurnStance: string[]
 	messages: RepairPromptMessage[]
 	deterministicReply: string
@@ -42,25 +54,33 @@ function formatList(values: string[], fallback: string): string {
 
 function buildSessionSummaryText(store: BalloonStateStore, sessionId: string): string {
 	const summary = store.getSessionSummary(sessionId)
-	if (!summary) return `Session: ${sessionId}\nTurns: 0\nGaps: 0\nTrickles: 0\nMemory items: 0\nLast updated: unknown`
+	if (!summary) return `Session: ${sessionId}\nTurns: 0\nGaps: 0\nTrickles: 0\nMemory items: 0\nRelease packets: 0\nLast updated: unknown`
 	return [
 		`Session: ${summary.sessionId}`,
 		`Turns: ${summary.turnCount}`,
 		`Gaps: ${summary.gapCount}`,
 		`Trickles: ${summary.trickleCount}`,
 		`Memory items: ${summary.memoryCount}`,
+		`Release packets: ${summary.releaseCount}`,
 		`Last updated: ${summary.lastUpdatedAt ?? "unknown"}`,
 	].join("\n")
 }
 
-function buildNextTurnStance(profile: StructuredProfile, hiddenRequirements: HiddenRequirement[], trickle: ProxyTrickle | null): string[] {
+function buildNextTurnStance(
+	profile: StructuredProfile,
+	hiddenRequirements: HiddenRequirement[],
+	trickle: ProxyTrickle | null,
+	releasePacket: ReleasePacket,
+): string[] {
 	const missingRequirements = hiddenRequirements.filter((requirement) => !requirement.coveredByResponse).map((requirement) => requirement.requirement)
+	const releasedGuidance = extractReleasedGuidance(releasePacket, 3)
+	const combinedRequirements = Array.from(new Set([...missingRequirements, ...releasedGuidance])).slice(0, 3)
 	const architectureDirection = profile.architectureDirection.find((entry) => !profile.protectedAreas.includes(entry))
 	return [
 		...(profile.protectedAreas[0] ? [`Avoid changing: ${profile.protectedAreas[0]}`] : []),
 		...(architectureDirection ? [`Preserve direction: ${architectureDirection}`] : []),
 		...(profile.verificationObligations[0] ? [`Verify: ${profile.verificationObligations[0]}`] : []),
-		...(missingRequirements.length > 0 ? [`Include: ${missingRequirements.slice(0, 3).join(", ")}`] : []),
+		...(combinedRequirements.length > 0 ? [`Include: ${combinedRequirements.join(", ")}`] : []),
 		...(trickle?.priorityInstructions[0] ? [`Pressure: ${trickle.priorityInstructions[0]}`] : []),
 	].slice(0, 4)
 }
@@ -156,6 +176,7 @@ function buildRepairPromptMessages(
 	trickle: ProxyTrickle | null,
 	memory: MemoryLedgerItem[],
 	semanticCara: SemanticCaraResult,
+	releasePacket: ReleasePacket,
 	requestText: string,
 ): RepairPromptMessage[] {
 	const systemSections = [
@@ -182,6 +203,9 @@ function buildRepairPromptMessages(
 		"",
 		"Proxy trickle instructions",
 		formatList(trickle?.priorityInstructions ?? [], "No proxy trickle instructions recorded."),
+		"",
+		"Similarity-gated release",
+		releasePacket.deliveryText,
 		"",
 		"Reinforced memory items",
 		formatList(memory.map((item) => `${item.itemText} (${item.status})`), "No reinforced memory items recorded."),
@@ -221,6 +245,7 @@ function buildDeterministicRepairedReply(
 	hiddenRequirements: HiddenRequirement[],
 	gaps: BalloonGap[],
 	nextTurnStance: string[],
+	releasePacket: ReleasePacket,
 ): string {
 	const target = extractBoundedTarget(requestText)
 	const preservedDirection =
@@ -230,6 +255,7 @@ function buildDeterministicRepairedReply(
 	const specificProtectedArea = profile.protectedAreas.find((entry) => !isGenericProtectedArea(entry))
 	const protectedPath = specificProtectedArea ? extractProtectedPath(specificProtectedArea) : null
 	const missingRequirements = hiddenRequirements.filter((requirement) => !requirement.coveredByResponse).map((requirement) => requirement.requirement).slice(0, 3)
+	const releasedGuidance = extractReleasedGuidance(releasePacket, 4)
 	const verificationNeeds = buildVerificationCarryForward(profile)
 	const preserveTypeSafety = verificationNeeds.includes("type safety")
 	const hasArchitectureDrift = gaps.some((gap) => gap.type === "architecture_drift" || gap.type === "temporal_drift")
@@ -257,7 +283,7 @@ function buildDeterministicRepairedReply(
 		sentences.push("I would keep type safety intact while making that improvement.")
 	}
 
-	const followOns = [...missingRequirements, ...verificationNeeds.filter((value) => value !== "type safety")].slice(0, 4)
+	const followOns = Array.from(new Set([...missingRequirements, ...releasedGuidance, ...verificationNeeds.filter((value) => value !== "type safety")])).slice(0, 4)
 	if (followOns.length > 0) {
 		sentences.push(`I would also carry forward ${joinPhraseList(followOns.map((value) => cleanSentence(value)))}.`)
 	}
@@ -269,11 +295,12 @@ function buildDeterministicRepairedReply(
 	return sentences.join(" ")
 }
 
-function buildCorrectionSummary(gaps: BalloonGap[], hiddenRequirements: HiddenRequirement[], profile: StructuredProfile): string {
+function buildCorrectionSummary(gaps: BalloonGap[], hiddenRequirements: HiddenRequirement[], profile: StructuredProfile, releasePacket: ReleasePacket): string {
 	const corrections: string[] = []
 	if (gaps.some((gap) => gap.type === "architecture_drift" || gap.type === "temporal_drift")) corrections.push("preserving the earlier architecture direction")
 	if (profile.verificationObligations.length > 0 || gaps.some((gap) => gap.type === "constraint_omission")) corrections.push("reintroducing verification obligations")
 	if (hiddenRequirements.some((requirement) => !requirement.coveredByResponse)) corrections.push("surfacing missing follow-on requirements")
+	if (releasePacket.released.length > 0) corrections.push("releasing similarity-matched corrections from memory and trickle")
 	if (gaps.some((gap) => gap.type === "sycophantic_drift")) corrections.push("removing agreement-heavy phrasing")
 	if (corrections.length === 0) return "Balloon found little to correct beyond keeping the next reply aligned to the stored session context."
 	return `Balloon corrected the path by ${joinPhraseList(corrections)}.`
@@ -290,6 +317,7 @@ function buildSemanticCaraPacket(bundle: {
 	nextTurnStance: string[]
 	trickle: ProxyTrickle | null
 	memory: MemoryLedgerItem[]
+	releasePacket: ReleasePacket
 	deterministicReply: string
 	deterministicCorrectionSummary: string
 }): SemanticCaraPacket {
@@ -304,7 +332,7 @@ function buildSemanticCaraPacket(bundle: {
 		nextTurnStance: bundle.nextTurnStance,
 		trickleInstructions: bundle.trickle?.priorityInstructions ?? [],
 		retrievalAnchors: bundle.trickle?.retrievalAnchors ?? [],
-		memoryItems: bundle.memory.map((item) => item.itemText),
+		memoryItems: [...bundle.memory.map((item) => item.itemText), ...bundle.releasePacket.released.map((item) => item.sourceText)],
 		deterministicReply: bundle.deterministicReply,
 		correctionSummary: bundle.deterministicCorrectionSummary,
 	}
@@ -351,10 +379,26 @@ export function buildBalloonRepairBundle(
 	if (trickle) store.saveTrickle(trickle)
 
 	const memory = store.getMemoryLedger(sessionId).slice(0, 5)
+	const releaseQueryText = [
+		latestUserRequest,
+		...gaps.flatMap((gap) => [gap.title, gap.description, ...gap.suggestedQueries]),
+		...hiddenRequirements.map((requirement) => requirement.requirement),
+		...profile.verificationObligations,
+		...(trickle?.priorityInstructions ?? []),
+	].join("\n")
+	const releasePacket = buildReleasePacket(sessionId, {
+		queryText: releaseQueryText,
+		recentTrickles: [
+			...(trickle ? [trickle] : []),
+			...store.getRecentTrickles(sessionId, 3).filter((candidate) => !trickle || candidate.trickleId !== trickle.trickleId),
+		],
+		memoryItems: memory,
+	})
+	store.saveReleasePacket(releasePacket)
 	const summaryText = buildSessionSummaryText(store, sessionId)
-	const nextTurnStance = buildNextTurnStance(profile, hiddenRequirements, trickle)
-	const deterministicReply = buildDeterministicRepairedReply(latestUserRequest, profile, hiddenRequirements, gaps, nextTurnStance)
-	const deterministicCorrectionSummary = buildCorrectionSummary(gaps, hiddenRequirements, profile)
+	const nextTurnStance = buildNextTurnStance(profile, hiddenRequirements, trickle, releasePacket)
+	const deterministicReply = buildDeterministicRepairedReply(latestUserRequest, profile, hiddenRequirements, gaps, nextTurnStance, releasePacket)
+	const deterministicCorrectionSummary = buildCorrectionSummary(gaps, hiddenRequirements, profile, releasePacket)
 	const semanticCaraConfig = resolveSemanticCaraConfig({
 		mode: options?.semanticMode,
 		adapterPath: options?.semanticAdapterPath,
@@ -372,12 +416,13 @@ export function buildBalloonRepairBundle(
 		nextTurnStance,
 		trickle,
 		memory,
+		releasePacket,
 		deterministicReply,
 		deterministicCorrectionSummary,
 	})
 	const semanticCara = runSemanticCara(semanticCaraPacket, semanticCaraConfig)
 	const merged = mergeSemanticRepair(semanticCaraPacket, semanticCara)
-	const messages = buildRepairPromptMessages(summaryText, profile, gaps, trickle, memory, semanticCara, latestUserRequest)
+	const messages = buildRepairPromptMessages(summaryText, profile, gaps, trickle, memory, semanticCara, releasePacket, latestUserRequest)
 
 	return {
 		sessionId,
@@ -389,6 +434,7 @@ export function buildBalloonRepairBundle(
 		gaps,
 		trickle,
 		memory,
+		releasePacket,
 		nextTurnStance,
 		messages,
 		deterministicReply,

@@ -41,9 +41,10 @@ That adapter can call whatever model or local inference stack you want.
 Current truth:
 
 1. the adapter contract is implemented
-2. the current smoke verifier proves `shadow` mode
-3. `assist` mode has passed a direct local adapter check
+2. the current smoke verifier covers both `shadow` and `assist`
+3. `assist` mode is now a real benchmark lane, not just a future hook
 4. MCP-hosted `assist` execution can still depend on the host allowing child-process execution
+5. deterministic Balloon remains the default anchor until assist earns default status on real scenarios
 
 ## Why This Matters
 
@@ -128,5 +129,6 @@ Use the lanes like this:
 1. benchmark `baseline`
 2. benchmark deterministic Balloon
 3. benchmark hybrid Balloon
+4. compare those against the staged external prototype when you want the fuller external approximation story
 
 That is the cleanest way to measure whether semantic CARA is worth its latency and correction tax.

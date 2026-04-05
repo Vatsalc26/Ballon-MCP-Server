@@ -1,0 +1,6 @@
+{
+  "sessionId": "workflow-command-safe-2",
+  "userRequest": "I want to improve interrupted-run incident messaging so owners can understand what happened without broad refactoring of command handling.",
+  "forceStageCount": 3,
+  "semanticAdapterPath": ".\\examples\\semantic_cara_adapter.example.mjs"
+}

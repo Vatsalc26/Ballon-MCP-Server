@@ -79,12 +79,69 @@ export interface MemoryLedgerItem {
 	updatedAt: string
 }
 
+export type ReleaseSourceKind = "memory" | "trickle"
+
+export interface ReleasedCorrection {
+	releaseId: string
+	sessionId: string
+	sourceKind: ReleaseSourceKind
+	sourceId: string
+	sourceText: string
+	similarityScore: number
+	threshold: number
+	matchedTerms: string[]
+	released: boolean
+	status?: MemoryLedgerItem["status"]
+	createdAt: string
+}
+
+export interface ReleasePacket {
+	packetId: string
+	sessionId: string
+	queryText: string
+	released: ReleasedCorrection[]
+	held: ReleasedCorrection[]
+	summary: string
+	deliveryText: string
+	createdAt: string
+}
+
+export type StagedBalloonStageId = "early" | "mid" | "deep"
+
+export interface StagedBalloonStage {
+	stageId: StagedBalloonStageId
+	label: string
+	active: boolean
+	reason: string
+	gaps: BalloonGap[]
+	hiddenRequirements: HiddenRequirement[]
+	retrievalHits: RetrievalHit[]
+	trickleInstructions: string[]
+	releasedCorrections: ReleasedCorrection[]
+	stageSummary: string
+}
+
+export interface StagedBalloonResult {
+	sessionId: string
+	turnCount: number
+	thresholds: number[]
+	forcedStageCount: number | null
+	activeStageCount: number
+	stages: StagedBalloonStage[]
+	releasePacket: ReleasePacket
+	deterministicReply: string
+	stagedReply: string
+	deterministicCorrectionSummary: string
+	stagedCorrectionSummary: string
+}
+
 export interface BalloonSessionSummary {
 	sessionId: string
 	turnCount: number
 	gapCount: number
 	trickleCount: number
 	memoryCount: number
+	releaseCount: number
 	lastUpdatedAt: string | null
 }
 
