@@ -2,6 +2,11 @@
 
 All notable public changes to Balloon MCP should be recorded in this file.
 
+## Unreleased
+
+1. improved deterministic repair phrasing so repaired replies preserve direction more naturally
+2. benchmark pilot logging moved from plan-only to first recorded results in the private source-of-truth docs
+
 ## 0.1.0-alpha.0 - 2026-04-05
 
 First public alpha.

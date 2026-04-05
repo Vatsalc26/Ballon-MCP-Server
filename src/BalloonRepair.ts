@@ -63,6 +63,10 @@ function cleanSentence(value: string): string {
 	return value.trim().replace(/\s+/g, " ").replace(/[.]+$/u, "")
 }
 
+function normalizeQuotedText(value: string): string {
+	return value.replace(/[`"'“”]+/gu, "").trim()
+}
+
 function stripRequestPrefix(text: string): string {
 	return text
 		.replace(/^(please|kindly)\s+/iu, "")
@@ -83,7 +87,57 @@ function isGenericProtectedArea(value: string): boolean {
 
 function extractProtectedPath(value: string): string | null {
 	const pathMatch = /\b(?:src|app|lib|tests?|docs|scripts)\/[A-Za-z0-9_./-]+/u.exec(value)
-	return pathMatch?.[0] ?? null
+	return pathMatch?.[0].replace(/[.,;:]+$/u, "") ?? null
+}
+
+function isUserRequestLike(value: string): boolean {
+	return /^(please|kindly|i want to|i need to|we want to|we need to|can you|could you)\b/iu.test(value.trim())
+}
+
+function normalizeDirectionForReply(value: string): string | null {
+	const cleaned = cleanSentence(normalizeQuotedText(value))
+	if (cleaned.length === 0) return null
+	if (isUserRequestLike(cleaned)) return null
+	if (/^protected files?:/iu.test(cleaned)) return null
+	if (/^do not edit files/iu.test(cleaned)) return null
+	if (/read-only reasoning test/iu.test(cleaned)) return null
+	if (/^do not rewrite architecture/iu.test(cleaned)) return "the current architecture"
+	if (/^preserve existing architecture/iu.test(cleaned)) return "the existing architecture"
+	if (/^preserve the current .+ flow/iu.test(cleaned)) return cleaned.replace(/^preserve\s+/iu, "").trim()
+	if (/^preserve the existing .+/iu.test(cleaned)) return cleaned.replace(/^preserve\s+/iu, "").trim()
+	if (/^preserve .+/iu.test(cleaned)) return cleaned.replace(/^preserve\s+/iu, "").trim()
+	if (/^keep .+ architecture/iu.test(cleaned)) return cleaned.replace(/^keep\s+/iu, "").trim()
+	if (/^do not rewrite .+/iu.test(cleaned)) return "the existing structure"
+	return null
+}
+
+function buildVerificationCarryForward(profile: StructuredProfile): string[] {
+	const items = new Set<string>()
+	for (const obligation of profile.verificationObligations) {
+		const cleaned = cleanSentence(normalizeQuotedText(obligation))
+		if (cleaned.length === 0) continue
+		if (/tests are required/i.test(cleaned)) {
+			items.add("tests for the affected change")
+			continue
+		}
+		if (/include tests/i.test(cleaned)) {
+			items.add("tests")
+		}
+		if (/type safety/i.test(cleaned)) {
+			items.add("type safety")
+		}
+		if (/incident clarity/i.test(cleaned) || /replayability/i.test(cleaned)) {
+			items.add(cleaned)
+			continue
+		}
+		items.add(cleaned)
+	}
+	for (const constraint of profile.constraints) {
+		const cleaned = cleanSentence(normalizeQuotedText(constraint))
+		if (/type safety/i.test(cleaned)) items.add("type safety")
+		if (/include tests/i.test(cleaned) && !/tests? for the affected change/i.test(Array.from(items).join(" "))) items.add("tests")
+	}
+	return Array.from(items).slice(0, 3)
 }
 
 function joinPhraseList(values: string[]): string {
@@ -163,25 +217,29 @@ function buildDeterministicRepairedReply(
 	nextTurnStance: string[],
 ): string {
 	const target = extractBoundedTarget(requestText)
-	const preservedDirection = profile.architectureDirection.find((entry) => !profile.protectedAreas.includes(entry)) ?? profile.constraints.find((entry) => /\bpreserve\b|\bdo not rewrite\b|\bexisting architecture\b/i.test(entry))
+	const preservedDirection =
+		[...profile.architectureDirection, ...profile.constraints]
+			.map((entry) => normalizeDirectionForReply(entry))
+			.find((entry): entry is string => entry !== null) ?? null
 	const specificProtectedArea = profile.protectedAreas.find((entry) => !isGenericProtectedArea(entry))
 	const protectedPath = specificProtectedArea ? extractProtectedPath(specificProtectedArea) : null
 	const missingRequirements = hiddenRequirements.filter((requirement) => !requirement.coveredByResponse).map((requirement) => requirement.requirement).slice(0, 3)
-	const verificationNeeds = profile.verificationObligations.slice(0, 2)
+	const verificationNeeds = buildVerificationCarryForward(profile)
+	const preserveTypeSafety = verificationNeeds.includes("type safety")
 	const hasArchitectureDrift = gaps.some((gap) => gap.type === "architecture_drift" || gap.type === "temporal_drift")
 
 	const sentences: string[] = []
 
 	if (preservedDirection) {
-		sentences.push(`I would preserve ${cleanSentence(preservedDirection).replace(/^(Preserve|preserve)\s+/u, "").replace(/^(Do not|do not)\s+/u, "").replace(/^(Keep|keep)\s+/u, "").trim() || "the existing direction"} and keep this change bounded.`)
+		sentences.push(`I would preserve ${preservedDirection} and keep this change bounded.`)
 	} else {
 		sentences.push("I would keep this change bounded to the existing direction rather than starting with a broader rewrite.")
 	}
 
 	if (target) {
 		const targetSentence = hasArchitectureDrift
-			? `I would focus directly on ${target} instead of starting with a larger refactor.`
-			: `I would focus directly on ${target}.`
+			? `I would focus directly on the requested change: ${target}, instead of starting with a larger refactor.`
+			: `I would focus directly on the requested change: ${target}.`
 		sentences.push(targetSentence)
 	}
 
@@ -189,7 +247,11 @@ function buildDeterministicRepairedReply(
 		sentences.push(`I would avoid changing ${protectedPath} while making that improvement.`)
 	}
 
-	const followOns = [...missingRequirements, ...verificationNeeds].slice(0, 4)
+	if (preserveTypeSafety) {
+		sentences.push("I would keep type safety intact while making that improvement.")
+	}
+
+	const followOns = [...missingRequirements, ...verificationNeeds.filter((value) => value !== "type safety")].slice(0, 4)
 	if (followOns.length > 0) {
 		sentences.push(`I would also carry forward ${joinPhraseList(followOns.map((value) => cleanSentence(value)))}.`)
 	}
