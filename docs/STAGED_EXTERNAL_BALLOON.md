@@ -53,6 +53,36 @@ Default turn thresholds are:
 
 For short demos or benchmark scenarios, use `forceStageCount: 3` so the full staged path is visible even in a small session.
 
+Those defaults are intentionally low because they make the staged lane visible in short public demos.
+
+They are not necessarily the best everyday coding thresholds.
+
+## Recommended Stage Strategy
+
+Do not think of this as "100 balloons."
+
+For the MCP product, the better shape is:
+
+1. keep `3` named stages: `early`, `mid`, `deep`
+2. support long sessions of `100+` turns with those same stages
+3. let the stage thresholds change by use case
+
+Recommended profiles:
+
+1. public demo profile: `3 / 6 / 10`
+2. everyday coding profile: `5 / 15 / 40`
+3. long-session benchmark profile: `8 / 25 / 60`
+
+That means:
+
+1. `early` catches the first visible drift
+2. `mid` starts doing more retrieval and hidden-requirement pressure
+3. `deep` becomes the longer-session selective-release lane
+
+For a `100`-turn session, the point is not to create `100` balloons.
+
+The point is to let the same staged system stay useful across the whole trajectory.
+
 ## Why This Exists
 
 The staged lane is the first MCP-buildable step toward the paper's multi-balloon feel.
@@ -70,6 +100,7 @@ Today:
 1. deterministic Balloon is still the benchmark anchor
 2. assist Balloon is the optional semantic refinement lane
 3. staged Balloon is the fuller external approximation lane
+4. the current stage count is intentionally `3`, not unbounded
 
 The right comparison is:
 
