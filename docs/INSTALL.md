@@ -126,9 +126,10 @@ If the install path still depends on extra verbal guidance, the public surface i
 5. `balloon_compare_repair_lanes`
 6. `balloon_run_staged_cycle`
 7. `balloon_compare_benchmark_lanes`
-8. `balloon_review_session_drift`
-9. `balloon://sessions/{sessionId}/gaps`
-10. `balloon://sessions/{sessionId}/releases`
+8. `balloon_run_long_session_benchmark`
+9. `balloon_review_session_drift`
+10. `balloon://sessions/{sessionId}/gaps`
+11. `balloon://sessions/{sessionId}/releases`
 
 If prompt invocation is inconsistent in your MCP host, prefer `balloon_repair_next_turn` for repeatable demos and benchmark runs.
 

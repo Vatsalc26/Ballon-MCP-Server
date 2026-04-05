@@ -135,6 +135,45 @@ export interface StagedBalloonResult {
 	stagedCorrectionSummary: string
 }
 
+export interface BenchmarkLaneComparison {
+	sessionId: string
+	requestText: string
+	latestResponse: string | null
+	baselineReply: string
+	deterministicReply: string
+	assistReply: string
+	stagedReply: string
+	deterministicCorrectionSummary: string
+	assistCorrectionSummary: string
+	stagedCorrectionSummary: string
+	baselineDiffers: boolean
+	assistDiffers: boolean
+	stagedDiffers: boolean
+	assistSemanticCara: SemanticCaraResult
+	assistReleasePacket: ReleasePacket
+	stagedReleasePacket: ReleasePacket
+	stagedActiveStageCount: number
+	stagedThresholds: number[]
+	stagedStages: StagedBalloonStage[]
+}
+
+export interface LongSessionBenchmarkCheckpoint {
+	checkpoint: number
+	actualTurnCount: number
+	checkpointSessionId: string
+	requestText: string
+	latestResponse: string | null
+	comparison: BenchmarkLaneComparison
+}
+
+export interface LongSessionBenchmarkResult {
+	sessionId: string
+	totalTurnCount: number
+	requestedCheckpoints: number[]
+	executedCheckpoints: LongSessionBenchmarkCheckpoint[]
+	forceStageCount: number | null
+}
+
 export interface BalloonSessionSummary {
 	sessionId: string
 	turnCount: number

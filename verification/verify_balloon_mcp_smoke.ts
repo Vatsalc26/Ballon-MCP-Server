@@ -233,6 +233,7 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			hasTool(toolsList, "balloon_compare_repair_lanes") &&
 			hasTool(toolsList, "balloon_run_staged_cycle") &&
 			hasTool(toolsList, "balloon_compare_benchmark_lanes") &&
+			hasTool(toolsList, "balloon_run_long_session_benchmark") &&
 			hasTool(toolsList, "balloon_review_session_drift")
 		details.push(`toolSurfacePassed=${toolSurfacePassed ? "yes" : "no"}`)
 
@@ -403,6 +404,45 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			benchmarkLaneCompare.structuredContent?.assistSemanticCara?.status === "assisted" &&
 			benchmarkLaneCompare.structuredContent?.stagedActiveStageCount === 3
 		details.push(`benchmarkLaneCompareWorked=${benchmarkLaneCompareWorked ? "yes" : "no"}`)
+
+		const longSessionBenchmark = (await client.request("tools/call", {
+			name: "balloon_run_long_session_benchmark",
+			arguments: {
+				sessionId: `${sessionId}-long`,
+				turns: [
+					{ role: "system", content: "Protected files: src/critical/router.ts. Do not rewrite architecture. Tests required for changes." },
+					{ role: "user", content: latestUserRequest },
+					{ role: "assistant", content: latestResponse },
+					{ role: "user", content: "Keep the change bounded, keep type safety intact, and do not widen scope into the router." },
+					{ role: "assistant", content: "I should still replace the router entirely so the retry behavior is cleaner later." },
+				],
+				checkpoints: [3, 5],
+				semanticAdapterPath: "./examples/semantic_cara_adapter.example.mjs",
+				forceStageCount: 3,
+			},
+		})) as {
+			structuredContent?: {
+				totalTurnCount?: number
+				executedCheckpoints?: Array<{
+					actualTurnCount?: number
+					comparison?: {
+						baselineReply?: string
+						assistSemanticCara?: { status?: string }
+						stagedActiveStageCount?: number
+						stagedReply?: string
+					}
+				}>
+			}
+		}
+		const longSessionBenchmarkWorked =
+			(longSessionBenchmark.structuredContent?.totalTurnCount ?? 0) >= 5 &&
+			(longSessionBenchmark.structuredContent?.executedCheckpoints?.length ?? 0) >= 2 &&
+			(longSessionBenchmark.structuredContent?.executedCheckpoints?.[0]?.actualTurnCount ?? 0) >= 3 &&
+			Boolean(longSessionBenchmark.structuredContent?.executedCheckpoints?.[0]?.comparison?.baselineReply?.includes("Absolutely")) &&
+			longSessionBenchmark.structuredContent?.executedCheckpoints?.[0]?.comparison?.assistSemanticCara?.status === "assisted" &&
+			longSessionBenchmark.structuredContent?.executedCheckpoints?.[0]?.comparison?.stagedActiveStageCount === 3 &&
+			Boolean(longSessionBenchmark.structuredContent?.executedCheckpoints?.[1]?.comparison?.stagedReply?.includes("The smallest safe next step"))
+		details.push(`longSessionBenchmarkWorked=${longSessionBenchmarkWorked ? "yes" : "no"}`)
 
 		const reviewDriftFallback = (await client.request("tools/call", {
 			name: "balloon_review_session_drift",

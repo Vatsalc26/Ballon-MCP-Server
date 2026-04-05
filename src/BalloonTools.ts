@@ -1,7 +1,9 @@
 import type {
 	BalloonGap,
 	BalloonSessionSummary,
+	BenchmarkLaneComparison,
 	HiddenRequirement,
+	LongSessionBenchmarkCheckpoint,
 	ProxyTrickle,
 	ReleasePacket,
 	RetrievalHit,
@@ -74,6 +76,14 @@ function asPositiveInt(value: unknown, fallback: number): number {
 	if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.floor(value)
 	if (typeof value === "string" && /^\d+$/u.test(value)) return Math.max(1, Number.parseInt(value, 10))
 	return fallback
+}
+
+function asPositiveIntArray(value: unknown, fallback: number[]): number[] {
+	if (!Array.isArray(value)) return [...fallback]
+	const normalized = value
+		.map((entry) => (typeof entry === "number" && Number.isFinite(entry) ? Math.floor(entry) : typeof entry === "string" && /^\d+$/u.test(entry) ? Number.parseInt(entry, 10) : NaN))
+		.filter((entry) => Number.isFinite(entry) && entry > 0)
+	return normalized.length > 0 ? normalized : [...fallback]
 }
 
 function asTurns(value: unknown): Array<{ role: string; content: string; timestamp?: string }> {
@@ -242,6 +252,105 @@ function findLatestTurnContent(turns: Array<{ role: string; content: string; tim
 function getActiveGaps(store: BalloonStateStore, sessionId: string, requestedGapIds: string[]): BalloonGap[] {
 	if (requestedGapIds.length > 0) return store.getGapsByIds(sessionId, requestedGapIds)
 	return store.getRecentGaps(sessionId, 8)
+}
+
+type BenchmarkLaneOptions = {
+	userRequest?: string
+	latestResponse?: string
+	semanticAdapterPath?: unknown
+	semanticTimeoutMs?: unknown
+	semanticMaxNotes?: unknown
+	forceStageCount?: unknown
+	stageThresholds?: unknown
+}
+
+function buildBenchmarkLaneComparison(store: BalloonStateStore, sessionId: string, options: BenchmarkLaneOptions): BenchmarkLaneComparison | null {
+	const baseline = buildBalloonRepairBundle(store, sessionId, {
+		userRequest: options.userRequest,
+		latestResponse: options.latestResponse,
+		semanticMode: "off",
+	})
+	if (!baseline) return null
+	const assist = buildBalloonRepairBundle(store, sessionId, {
+		userRequest: options.userRequest,
+		latestResponse: options.latestResponse,
+		semanticMode: "assist",
+		semanticAdapterPath: options.semanticAdapterPath,
+		semanticTimeoutMs: options.semanticTimeoutMs,
+		semanticMaxNotes: options.semanticMaxNotes,
+	})
+	if (!assist) return null
+	const staged = buildStagedBalloonResult(store, sessionId, {
+		userRequest: options.userRequest,
+		latestResponse: options.latestResponse,
+		forceStageCount: options.forceStageCount,
+		stageThresholds: options.stageThresholds,
+	})
+	if (!staged) return null
+	const baselineReply = baseline.latestResponse ?? "(no latest assistant response found)"
+	return {
+		sessionId,
+		requestText: baseline.requestText,
+		latestResponse: baseline.latestResponse,
+		baselineReply,
+		deterministicReply: baseline.repairedReply,
+		assistReply: assist.repairedReply,
+		stagedReply: staged.stagedReply,
+		deterministicCorrectionSummary: baseline.correctionSummary,
+		assistCorrectionSummary: assist.correctionSummary,
+		stagedCorrectionSummary: staged.stagedCorrectionSummary,
+		baselineDiffers: baselineReply.trim() !== baseline.repairedReply.trim(),
+		assistDiffers: assist.repairedReply.trim() !== baseline.repairedReply.trim(),
+		stagedDiffers: staged.stagedReply.trim() !== baseline.repairedReply.trim(),
+		assistSemanticCara: assist.semanticCara,
+		assistReleasePacket: assist.releasePacket,
+		stagedReleasePacket: staged.releasePacket,
+		stagedActiveStageCount: staged.activeStageCount,
+		stagedThresholds: staged.thresholds,
+		stagedStages: staged.stages,
+	}
+}
+
+function resolveCheckpointTurns(turns: Array<{ role: string; content: string; timestamp?: string }>, requestedCheckpoints: number[]): Array<{ checkpoint: number; actualTurnCount: number }> {
+	const resolved: Array<{ checkpoint: number; actualTurnCount: number }> = []
+	const seen = new Set<number>()
+	for (const checkpoint of [...requestedCheckpoints].sort((left, right) => left - right)) {
+		const capped = Math.min(checkpoint, turns.length)
+		let index = capped - 1
+		while (index >= 0 && turns[index]?.role !== "assistant") index -= 1
+		if (index < 0) continue
+		const actualTurnCount = index + 1
+		if (seen.has(actualTurnCount)) continue
+		const checkpointTurns = turns.slice(0, actualTurnCount)
+		if (!findLatestTurnContent(checkpointTurns, "user") || !findLatestTurnContent(checkpointTurns, "assistant")) continue
+		seen.add(actualTurnCount)
+		resolved.push({ checkpoint, actualTurnCount })
+	}
+	return resolved
+}
+
+function formatLongSessionCheckpoint(checkpoint: LongSessionBenchmarkCheckpoint): string {
+	return [
+		`Requested checkpoint: ${checkpoint.checkpoint}`,
+		`Executed turn count: ${checkpoint.actualTurnCount}`,
+		`Checkpoint session: ${checkpoint.checkpointSessionId}`,
+		`Assist semantic status: ${checkpoint.comparison.assistSemanticCara.status}`,
+		`Staged active stages: ${checkpoint.comparison.stagedActiveStageCount}`,
+		`Assist differs from deterministic: ${checkpoint.comparison.assistDiffers ? "yes" : "no"}`,
+		`Staged differs from deterministic: ${checkpoint.comparison.stagedDiffers ? "yes" : "no"}`,
+		"",
+		"Baseline reply",
+		checkpoint.comparison.baselineReply,
+		"",
+		"Deterministic Balloon reply",
+		checkpoint.comparison.deterministicReply,
+		"",
+		"Assist Balloon reply",
+		checkpoint.comparison.assistReply,
+		"",
+		"Staged external Balloon reply",
+		checkpoint.comparison.stagedReply,
+	].join("\n")
 }
 
 export function buildBalloonToolDefinitions(): ToolDefinition[] {
@@ -802,77 +911,139 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 			run: (args, context) => {
 				const sessionId = asString(args.sessionId)
 				if (!sessionId) return toolError("sessionId is required.")
-				const baseline = buildBalloonRepairBundle(context.store, sessionId, {
+				const comparison = buildBenchmarkLaneComparison(context.store, sessionId, {
 					userRequest: asString(args.userRequest) ?? undefined,
 					latestResponse: asString(args.latestResponse) ?? undefined,
-					semanticMode: "off",
-				})
-				if (!baseline) return toolError(`Could not build the benchmark comparison for session ${sessionId}.`)
-				const assist = buildBalloonRepairBundle(context.store, sessionId, {
-					userRequest: asString(args.userRequest) ?? undefined,
-					latestResponse: asString(args.latestResponse) ?? undefined,
-					semanticMode: "assist",
 					semanticAdapterPath: args.semanticAdapterPath,
 					semanticTimeoutMs: args.semanticTimeoutMs,
 					semanticMaxNotes: args.semanticMaxNotes,
-				})
-				if (!assist) return toolError(`Could not build the assist lane for session ${sessionId}.`)
-				const staged = buildStagedBalloonResult(context.store, sessionId, {
-					userRequest: asString(args.userRequest) ?? undefined,
-					latestResponse: asString(args.latestResponse) ?? undefined,
 					forceStageCount: args.forceStageCount ?? 3,
 					stageThresholds: args.stageThresholds,
 				})
-				if (!staged) return toolError(`Could not build the staged lane for session ${sessionId}.`)
-				const baselineReply = baseline.latestResponse ?? "(no latest assistant response found)"
-				const baselineDiffers = baselineReply.trim() !== baseline.repairedReply.trim()
-				const assistDiffers = assist.repairedReply.trim() !== baseline.repairedReply.trim()
-				const stagedDiffers = staged.stagedReply.trim() !== baseline.repairedReply.trim()
+				if (!comparison) return toolError(`Could not build the benchmark comparison for session ${sessionId}.`)
 				const text = [
 					"Balloon benchmark lane comparison ready.",
 					"",
 					"Baseline reply",
-					baselineReply,
+					comparison.baselineReply,
 					"",
 					"Deterministic Balloon",
-					baseline.repairedReply,
+					comparison.deterministicReply,
 					"",
 					"Assist Balloon",
-					assist.repairedReply,
+					comparison.assistReply,
 					"",
 					"Staged external Balloon",
-					staged.stagedReply,
+					comparison.stagedReply,
 					"",
 					"Lane deltas",
-					`Baseline differs from deterministic: ${baselineDiffers ? "yes" : "no"}`,
-					`Assist differs from deterministic: ${assistDiffers ? "yes" : "no"}`,
-					`Staged differs from deterministic: ${stagedDiffers ? "yes" : "no"}`,
-					`Assist semantic status: ${assist.semanticCara.status}`,
-					`Staged active stages: ${staged.activeStageCount}`,
+					`Baseline differs from deterministic: ${comparison.baselineDiffers ? "yes" : "no"}`,
+					`Assist differs from deterministic: ${comparison.assistDiffers ? "yes" : "no"}`,
+					`Staged differs from deterministic: ${comparison.stagedDiffers ? "yes" : "no"}`,
+					`Assist semantic status: ${comparison.assistSemanticCara.status}`,
+					`Staged active stages: ${comparison.stagedActiveStageCount}`,
 					"",
 					"Staged release packet",
-					formatReleasePacket(staged.releasePacket),
+					formatReleasePacket(comparison.stagedReleasePacket),
+				].join("\n")
+				return textResult(text, comparison as unknown as JsonRecord)
+			},
+		},
+		{
+			name: "balloon_run_long_session_benchmark",
+			title: "Run Long-Session Benchmark",
+			description: "Runs checkpointed baseline, deterministic, assist, and staged Balloon comparisons across a longer stored session.",
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["sessionId"],
+				properties: {
+					sessionId: { type: "string", description: "Stable Balloon session id." },
+					turns: {
+						type: "array",
+						description: "Optional turns to replace or append before running checkpointed long-session comparison.",
+						items: {
+							type: "object",
+							required: ["role", "content"],
+							properties: {
+								role: { type: "string", enum: ["user", "assistant", "system"] },
+								content: { type: "string" },
+								timestamp: { type: "string" },
+							},
+						},
+					},
+					mergeMode: { type: "string", enum: ["replace", "append"], description: "Whether provided turns replace or append." },
+					checkpoints: { type: "array", description: "Optional checkpoint turn counts. Defaults to 10, 25, 50.", items: { type: "number" } },
+					semanticAdapterPath: { type: "string", description: "Optional semantic adapter path for the assist lane." },
+					semanticTimeoutMs: { type: "number", description: "Optional semantic adapter timeout in milliseconds." },
+					semanticMaxNotes: { type: "number", description: "Optional cap on semantic notes returned." },
+					forceStageCount: { type: "number", description: "Optional stage override for demos or controlled reruns." },
+					stageThresholds: { type: "array", description: "Optional staged-lane thresholds.", items: { type: "number" } },
+				},
+			},
+			run: (args, context) => {
+				const sessionId = asString(args.sessionId)
+				if (!sessionId) return toolError("sessionId is required.")
+				const incomingTurns = asTurns(args.turns)
+				if (incomingTurns.length > 0) {
+					const mergeMode = asString(args.mergeMode) === "append" ? "append" : "replace"
+					if (mergeMode === "replace") context.store.replaceTurns(sessionId, incomingTurns)
+					else context.store.appendTurns(sessionId, incomingTurns)
+				}
+				const storedTurns = context.store.getTurns(sessionId, 5000)
+				if (storedTurns.length === 0) return toolError(`No turns found for session ${sessionId}. Provide turns or build the session first.`)
+				const requestedCheckpoints = asPositiveIntArray(args.checkpoints, [10, 25, 50])
+				const checkpointSpecs = resolveCheckpointTurns(
+					storedTurns.map((turn) => ({ role: turn.role, content: turn.content, timestamp: turn.timestamp })),
+					requestedCheckpoints,
+				)
+				if (checkpointSpecs.length === 0) {
+					return toolError(`No valid checkpoints found for session ${sessionId}. Make sure at least one checkpoint lands on or after an assistant turn.`)
+				}
+				const executedCheckpoints: LongSessionBenchmarkCheckpoint[] = []
+				for (const checkpoint of checkpointSpecs) {
+					const checkpointTurns = storedTurns
+						.slice(0, checkpoint.actualTurnCount)
+						.map((turn) => ({ role: turn.role, content: turn.content, timestamp: turn.timestamp }))
+					const checkpointSessionId = `${sessionId}__checkpoint_${checkpoint.actualTurnCount}`
+					context.store.replaceTurns(checkpointSessionId, checkpointTurns)
+					const comparison = buildBenchmarkLaneComparison(context.store, checkpointSessionId, {
+						semanticAdapterPath: args.semanticAdapterPath,
+						semanticTimeoutMs: args.semanticTimeoutMs,
+						semanticMaxNotes: args.semanticMaxNotes,
+						forceStageCount: args.forceStageCount,
+						stageThresholds: args.stageThresholds,
+					})
+					if (!comparison) return toolError(`Could not build checkpoint comparison for ${checkpointSessionId}.`)
+					executedCheckpoints.push({
+						checkpoint: checkpoint.checkpoint,
+						actualTurnCount: checkpoint.actualTurnCount,
+						checkpointSessionId,
+						requestText: comparison.requestText,
+						latestResponse: comparison.latestResponse,
+						comparison,
+					})
+				}
+				const assistChangedCount = executedCheckpoints.filter((entry) => entry.comparison.assistDiffers).length
+				const stagedChangedCount = executedCheckpoints.filter((entry) => entry.comparison.stagedDiffers).length
+				const text = [
+					"Balloon long-session benchmark ready.",
+					"",
+					`Base session: ${sessionId}`,
+					`Total turns: ${storedTurns.length}`,
+					`Requested checkpoints: ${requestedCheckpoints.join(", ")}`,
+					`Executed checkpoints: ${executedCheckpoints.map((entry) => entry.actualTurnCount).join(", ")}`,
+					`Assist changed deterministic at checkpoints: ${assistChangedCount}/${executedCheckpoints.length}`,
+					`Staged changed deterministic at checkpoints: ${stagedChangedCount}/${executedCheckpoints.length}`,
+					"",
+					...executedCheckpoints.flatMap((entry, index) => [`Checkpoint ${index + 1}`, formatLongSessionCheckpoint(entry), ""]),
 				].join("\n")
 				return textResult(text, {
 					sessionId,
-					requestText: baseline.requestText,
-					latestResponse: baseline.latestResponse,
-					baselineReply,
-					deterministicReply: baseline.repairedReply,
-					assistReply: assist.repairedReply,
-					stagedReply: staged.stagedReply,
-					deterministicCorrectionSummary: baseline.correctionSummary,
-					assistCorrectionSummary: assist.correctionSummary,
-					stagedCorrectionSummary: staged.stagedCorrectionSummary,
-					baselineDiffers,
-					assistDiffers,
-					stagedDiffers,
-					assistSemanticCara: assist.semanticCara,
-					assistReleasePacket: assist.releasePacket,
-					stagedReleasePacket: staged.releasePacket,
-					stagedActiveStageCount: staged.activeStageCount,
-					stagedThresholds: staged.thresholds,
-					stagedStages: staged.stages,
+					totalTurnCount: storedTurns.length,
+					requestedCheckpoints,
+					executedCheckpoints,
+					forceStageCount: typeof args.forceStageCount === "number" && Number.isFinite(args.forceStageCount) ? Math.floor(args.forceStageCount) : null,
 				})
 			},
 		},

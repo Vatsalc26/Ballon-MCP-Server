@@ -37,6 +37,33 @@ Compare:
 3. assist
 4. staged
 
+## Recommended Tool
+
+Use `balloon_run_long_session_benchmark` when you want checkpointed long-session comparison in one tool call.
+
+Suggested starting call:
+
+```text
+Use #balloon_run_long_session_benchmark with:
+
+- sessionId: long-bench-25
+- checkpoints: [10, 25]
+- semanticAdapterPath: .\examples\semantic_cara_adapter.example.mjs
+- stageThresholds: [5, 15, 40]
+
+Return text only.
+Do not edit files.
+Do not apply patches.
+Do not run terminal commands.
+```
+
+That call will return checkpoint batches with:
+
+1. baseline reply
+2. deterministic Balloon reply
+3. assist Balloon reply
+4. staged external Balloon reply
+
 ## Recommended Staged Profiles
 
 Try:
@@ -50,6 +77,7 @@ Use these starting fixtures:
 
 1. [../examples/long_session_25_turns.example.json](../examples/long_session_25_turns.example.json)
 2. [../examples/long_session_50_turns.example.json](../examples/long_session_50_turns.example.json)
+3. [../examples/long_session_benchmark_request.example.json](../examples/long_session_benchmark_request.example.json)
 
 They are not "official benchmark wins."
 
@@ -65,6 +93,7 @@ It is one that:
 2. resists broad refactors when the session asked for bounded changes
 3. keeps verification visible
 4. avoids paying too much correction tax for weak gains
+5. stays easy enough to rerun that contributors can repeat the evidence
 
 ## Communication Rule
 

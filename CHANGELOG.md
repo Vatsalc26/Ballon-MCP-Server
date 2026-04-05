@@ -20,6 +20,8 @@ All notable public changes to Balloon MCP should be recorded in this file.
 14. added `balloon://sessions/{sessionId}/releases` so release packets are inspectable through MCP resources
 15. expanded the smoke verifier to cover staged-cycle and four-lane benchmark tooling
 16. added public docs/examples for the staged external lane and four-lane benchmark workflow
+17. added `balloon_run_long_session_benchmark` so checkpointed `10 / 25 / 50` style runs can be repeated in one call
+18. added public long-session benchmark request examples and updated docs to point at the checkpoint runner
 
 ## 0.1.0-alpha.0 - 2026-04-05
 

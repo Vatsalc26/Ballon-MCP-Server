@@ -120,9 +120,10 @@ Tools:
 9. `balloon_compare_repair_lanes`
 10. `balloon_run_staged_cycle`
 11. `balloon_compare_benchmark_lanes`
-12. `balloon_review_session_drift`
-13. `balloon_update_memory_ledger`
-14. `balloon_explain_gap_report`
+12. `balloon_run_long_session_benchmark`
+13. `balloon_review_session_drift`
+14. `balloon_update_memory_ledger`
+15. `balloon_explain_gap_report`
 
 Prompts:
 
@@ -163,6 +164,8 @@ If you want to compare deterministic vs hybrid repair output directly, use `ball
 If you want the staged external approximation without depending on prompt routing, use `balloon_run_staged_cycle`.
 
 If you want the benchmark-safe four-lane comparison, use `balloon_compare_benchmark_lanes`.
+
+If you want checkpointed long-session comparison in one tool call, use `balloon_run_long_session_benchmark`.
 
 If the demo feels good, the important part is not that Balloon produced more text. The important part is that it preserved the existing direction and pushed the next reply back toward the user's real constraints.
 

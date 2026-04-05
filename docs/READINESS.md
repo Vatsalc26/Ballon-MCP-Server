@@ -7,7 +7,8 @@ That means:
 1. the core external approximation is real
 2. the server is installable and smoke-verifiable
 3. the benchmark and demo paths are real
-4. the project is not yet claiming frictionless production readiness
+4. longer-session checkpoint benchmarking now has a first tool-level path
+5. the project is not yet claiming frictionless production readiness
 
 ## Good Current Fit
 
@@ -41,6 +42,7 @@ The honest current state is:
 2. assist and staged benchmark lanes
 3. VS Code-first host path
 4. install, demo, roadmap, contribution, and security docs
+5. first checkpointed long-session benchmark runner
 
 ## What Still Needs Work
 
