@@ -19,10 +19,18 @@ function closeAndExit(store: BalloonStateStore, code: number): never {
 
 async function main(): Promise<void> {
 	const argv = minimist(process.argv.slice(2), {
-		string: ["data-dir"],
+		string: ["data-dir", "semantic-cara-mode", "semantic-cara-adapter", "semantic-cara-timeout-ms", "semantic-cara-max-notes"],
 	})
 
 	const dataDir = typeof argv["data-dir"] === "string" ? argv["data-dir"] : undefined
+	const semanticCaraMode = typeof argv["semantic-cara-mode"] === "string" ? argv["semantic-cara-mode"] : undefined
+	const semanticCaraAdapter = typeof argv["semantic-cara-adapter"] === "string" ? argv["semantic-cara-adapter"] : undefined
+	const semanticCaraTimeoutMs = typeof argv["semantic-cara-timeout-ms"] === "string" ? argv["semantic-cara-timeout-ms"] : undefined
+	const semanticCaraMaxNotes = typeof argv["semantic-cara-max-notes"] === "string" ? argv["semantic-cara-max-notes"] : undefined
+	if (semanticCaraMode) process.env.BALLOON_SEMANTIC_CARA_MODE = semanticCaraMode
+	if (semanticCaraAdapter) process.env.BALLOON_SEMANTIC_CARA_ADAPTER = semanticCaraAdapter
+	if (semanticCaraTimeoutMs) process.env.BALLOON_SEMANTIC_CARA_TIMEOUT_MS = semanticCaraTimeoutMs
+	if (semanticCaraMaxNotes) process.env.BALLOON_SEMANTIC_CARA_MAX_NOTES = semanticCaraMaxNotes
 	const dbPath = createDefaultBalloonDbPath(process.cwd(), dataDir)
 	const store = new BalloonStateStore(dbPath)
 	const server = new BalloonMcpServer(store)

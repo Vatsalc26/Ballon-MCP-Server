@@ -32,6 +32,24 @@ Optional custom data directory:
 npm run balloon:mcp -- --data-dir .balloon-mcp-demo
 ```
 
+Optional semantic CARA shadow mode:
+
+```powershell
+npm run balloon:mcp -- --semantic-cara-mode shadow
+```
+
+Optional semantic CARA assist mode with an adapter:
+
+```powershell
+npm run balloon:mcp -- --semantic-cara-mode assist --semantic-cara-adapter .\examples\semantic_cara_adapter.example.mjs
+```
+
+Note:
+
+1. shadow mode is the verified smoke-test path today
+2. assist mode is implemented and has been verified in a direct local check
+3. MCP-hosted assist mode still depends on your host and local permissions allowing child-process execution
+
 ## Connect From An MCP Host
 
 See [../examples/claude_desktop_config.example.json](../examples/claude_desktop_config.example.json) for a starting config.
@@ -91,6 +109,9 @@ If the install path still depends on private verbal guidance, the public surface
 1. `balloon_run_cycle`
 2. `balloon/repair-next-turn`
 3. `balloon_repair_next_turn`
-4. `balloon://sessions/{sessionId}/gaps`
+4. `balloon_semantic_cara_preview`
+5. `balloon://sessions/{sessionId}/gaps`
 
 If prompt invocation is inconsistent in your MCP host, prefer `balloon_repair_next_turn` for repeatable demos and benchmark runs.
+
+If you want to experiment with the optional hybrid lane, read [SEMANTIC_CARA.md](./SEMANTIC_CARA.md).

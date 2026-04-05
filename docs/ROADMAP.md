@@ -114,6 +114,12 @@ The fastest credible path is a 2-lane build:
 1. deterministic Balloon as the stable reproducible base
 2. hybrid semantic Balloon as the next optional lane
 
+Current state inside that strategy:
+
+1. the deterministic base is already the benchmark anchor
+2. semantic CARA `shadow` mode is the first verified hybrid step
+3. semantic CARA `assist` mode is the adapter-backed experimental step
+
 That lets the project compare:
 
 1. baseline

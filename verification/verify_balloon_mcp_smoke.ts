@@ -20,6 +20,7 @@ type SmokeResult = {
 	promptSurfacePassed: boolean
 	heroCyclePassed: boolean
 	repairFallbackWorked: boolean
+	semanticCaraPreviewWorked: boolean
 	profileBuilt: boolean
 	gapAuditWorked: boolean
 	trickleGenerated: boolean
@@ -225,7 +226,8 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			hasTool(toolsList, "balloon_build_profile") &&
 			hasTool(toolsList, "balloon_audit_turn") &&
 			hasTool(toolsList, "balloon_generate_proxy_trickle") &&
-			hasTool(toolsList, "balloon_repair_next_turn")
+			hasTool(toolsList, "balloon_repair_next_turn") &&
+			hasTool(toolsList, "balloon_semantic_cara_preview")
 		details.push(`toolSurfacePassed=${toolSurfacePassed ? "yes" : "no"}`)
 
 		const promptsList = await client.request("prompts/list", {})
@@ -283,6 +285,27 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			(repairFallback.structuredContent?.promptMessages?.length ?? 0) >= 2
 		details.push(`repairFallbackWorked=${repairFallbackWorked ? "yes" : "no"}`)
 
+		const semanticPreview = (await client.request("tools/call", {
+			name: "balloon_semantic_cara_preview",
+			arguments: {
+				sessionId: `${sessionId}-hero`,
+				userRequest: latestUserRequest,
+				semanticMode: "shadow",
+			},
+		})) as {
+			structuredContent?: {
+				deterministicReply?: string
+				repairedReply?: string
+				semanticCara?: { status?: string; notes?: string[] }
+			}
+		}
+		const semanticCaraPreviewWorked =
+			Boolean(semanticPreview.structuredContent?.deterministicReply?.includes("I would")) &&
+			Boolean(semanticPreview.structuredContent?.repairedReply?.includes("I would")) &&
+			semanticPreview.structuredContent?.semanticCara?.status === "shadow" &&
+			(semanticPreview.structuredContent?.semanticCara?.notes?.length ?? 0) >= 1
+		details.push(`semanticCaraPreviewWorked=${semanticCaraPreviewWorked ? "yes" : "no"}`)
+
 		const buildProfile = (await client.request("tools/call", {
 			name: "balloon_build_profile",
 			arguments: {
@@ -336,6 +359,7 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			promptSurfacePassed: promptSurfacePassed && promptMessagesLookUsable,
 			heroCyclePassed,
 			repairFallbackWorked,
+			semanticCaraPreviewWorked,
 			profileBuilt,
 			gapAuditWorked,
 			trickleGenerated,
@@ -357,6 +381,7 @@ export function formatBalloonMcpSmoke(result: SmokeResult): string {
 		`Prompt surface: ${result.promptSurfacePassed ? "PASS" : "FAIL"}`,
 		`Hero cycle: ${result.heroCyclePassed ? "PASS" : "FAIL"}`,
 		`Repair fallback: ${result.repairFallbackWorked ? "PASS" : "FAIL"}`,
+		`Semantic CARA preview: ${result.semanticCaraPreviewWorked ? "PASS" : "FAIL"}`,
 		`Profile build: ${result.profileBuilt ? "PASS" : "FAIL"}`,
 		`Gap audit: ${result.gapAuditWorked ? "PASS" : "FAIL"}`,
 		`Proxy trickle: ${result.trickleGenerated ? "PASS" : "FAIL"}`,
@@ -376,6 +401,7 @@ async function main(): Promise<void> {
 			result.promptSurfacePassed &&
 			result.heroCyclePassed &&
 			result.repairFallbackWorked &&
+			result.semanticCaraPreviewWorked &&
 			result.profileBuilt &&
 			result.gapAuditWorked &&
 			result.trickleGenerated &&

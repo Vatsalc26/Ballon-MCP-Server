@@ -34,6 +34,7 @@ Then inspect:
 2. the proxy trickle
 3. the memory ledger update
 4. the repair path: `balloon/repair-next-turn` or `balloon_repair_next_turn`
+5. the optional hybrid lane: `balloon_semantic_cara_preview`
 
 ## Host-Tested Demo Prompts
 
@@ -95,6 +96,26 @@ Do not run terminal commands.
 Show me only:
 1. the repaired next assistant reply
 2. a short explanation of what Balloon corrected
+```
+
+### Prompt 3: Preview The Hybrid Lane
+
+```text
+Use #balloon_semantic_cara_preview with:
+
+- sessionId: queenshift-command-safe-2
+- userRequest: I want to improve interrupted-run incident messaging in Queenshift so owners can understand what happened without broad refactoring of command handling.
+- semanticMode: shadow
+
+Return text only.
+Do not edit files.
+Do not apply patches.
+Do not run terminal commands.
+
+Show me only:
+1. the deterministic repaired reply
+2. the effective repaired reply
+3. the semantic CARA notes
 ```
 
 ## Expected Outcome

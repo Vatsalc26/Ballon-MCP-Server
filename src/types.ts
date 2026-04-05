@@ -87,3 +87,46 @@ export interface BalloonSessionSummary {
 	memoryCount: number
 	lastUpdatedAt: string | null
 }
+
+export type SemanticCaraMode = "off" | "shadow" | "assist"
+
+export type SemanticCaraStatus = "disabled" | "shadow" | "assisted" | "error"
+
+export interface SemanticCaraConfig {
+	mode: SemanticCaraMode
+	adapterPath: string | null
+	timeoutMs: number
+	maxNotes: number
+	source: "default" | "env" | "tool"
+}
+
+export interface SemanticCaraPacket {
+	sessionId: string
+	requestText: string
+	latestResponse: string | null
+	summaryText: string
+	profile: StructuredProfile
+	gaps: BalloonGap[]
+	hiddenRequirements: HiddenRequirement[]
+	nextTurnStance: string[]
+	trickleInstructions: string[]
+	retrievalAnchors: string[]
+	memoryItems: string[]
+	deterministicReply: string
+	correctionSummary: string
+}
+
+export interface SemanticCaraResult {
+	mode: SemanticCaraMode
+	status: SemanticCaraStatus
+	notes: string[]
+	suggestedAdditions: string[]
+	rewrittenReply: string | null
+	correctionSummaryAddendum: string | null
+	error: string | null
+	providerMeta: {
+		adapterPath: string | null
+		durationMs: number
+		source: "shadow" | "adapter"
+	}
+}

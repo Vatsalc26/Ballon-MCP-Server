@@ -1,6 +1,7 @@
 import { auditLatestTurn, buildProxyTrickle, buildStructuredProfile, detectHiddenRequirements, retrieveRelevantTurns } from "./BalloonAnalysis"
+import { mergeSemanticRepair, resolveSemanticCaraConfig, runSemanticCara } from "./BalloonSemanticCARA"
 import { BalloonStateStore } from "./BalloonStateStore"
-import type { BalloonGap, HiddenRequirement, MemoryLedgerItem, ProxyTrickle, StructuredProfile } from "./types"
+import type { BalloonGap, HiddenRequirement, MemoryLedgerItem, ProxyTrickle, SemanticCaraConfig, SemanticCaraPacket, SemanticCaraResult, StructuredProfile } from "./types"
 
 export type RepairPromptMessage = {
 	role: "user" | "assistant" | "system"
@@ -14,6 +15,7 @@ export type BalloonRepairBundle = {
 	sessionId: string
 	summaryText: string
 	requestText: string
+	latestResponse: string | null
 	profile: StructuredProfile
 	hiddenRequirements: HiddenRequirement[]
 	gaps: BalloonGap[]
@@ -21,8 +23,12 @@ export type BalloonRepairBundle = {
 	memory: MemoryLedgerItem[]
 	nextTurnStance: string[]
 	messages: RepairPromptMessage[]
+	deterministicReply: string
 	repairedReply: string
+	deterministicCorrectionSummary: string
 	correctionSummary: string
+	semanticCaraConfig: SemanticCaraConfig
+	semanticCara: SemanticCaraResult
 }
 
 function asString(value: unknown): string | null {
@@ -120,12 +126,8 @@ function buildVerificationCarryForward(profile: StructuredProfile): string[] {
 			items.add("tests for the affected change")
 			continue
 		}
-		if (/include tests/i.test(cleaned)) {
-			items.add("tests")
-		}
-		if (/type safety/i.test(cleaned)) {
-			items.add("type safety")
-		}
+		if (/include tests/i.test(cleaned)) items.add("tests")
+		if (/type safety/i.test(cleaned)) items.add("type safety")
 		if (/incident clarity/i.test(cleaned) || /replayability/i.test(cleaned)) {
 			items.add(cleaned)
 			continue
@@ -153,12 +155,13 @@ function buildRepairPromptMessages(
 	gaps: BalloonGap[],
 	trickle: ProxyTrickle | null,
 	memory: MemoryLedgerItem[],
+	semanticCara: SemanticCaraResult,
 	requestText: string,
 ): RepairPromptMessage[] {
 	const systemSections = [
 		"You are preparing the next assistant turn in a Balloon-governed session.",
 		"Your job is to restore context fidelity without taking control away from the user.",
-		"Use the stored profile, recent gaps, proxy trickle, and memory items as low-volume corrective pressure.",
+		"Use the stored profile, recent gaps, proxy trickle, memory items, and semantic CARA notes as low-volume corrective pressure.",
 		"Do not mention Balloon, CARA, auditing, or trickle unless the user explicitly asks.",
 		"Prefer the smallest safe reply that gets the session back on track.",
 		"",
@@ -182,6 +185,9 @@ function buildRepairPromptMessages(
 		"",
 		"Reinforced memory items",
 		formatList(memory.map((item) => `${item.itemText} (${item.status})`), "No reinforced memory items recorded."),
+		"",
+		"Semantic CARA notes",
+		formatList(semanticCara.notes, semanticCara.status === "disabled" ? "Semantic CARA disabled." : "No semantic notes recorded."),
 		"",
 		"Response requirements",
 		"1. Answer the current request directly.",
@@ -273,12 +279,47 @@ function buildCorrectionSummary(gaps: BalloonGap[], hiddenRequirements: HiddenRe
 	return `Balloon corrected the path by ${joinPhraseList(corrections)}.`
 }
 
+function buildSemanticCaraPacket(bundle: {
+	sessionId: string
+	requestText: string
+	latestResponse: string | null
+	summaryText: string
+	profile: StructuredProfile
+	gaps: BalloonGap[]
+	hiddenRequirements: HiddenRequirement[]
+	nextTurnStance: string[]
+	trickle: ProxyTrickle | null
+	memory: MemoryLedgerItem[]
+	deterministicReply: string
+	deterministicCorrectionSummary: string
+}): SemanticCaraPacket {
+	return {
+		sessionId: bundle.sessionId,
+		requestText: bundle.requestText,
+		latestResponse: bundle.latestResponse,
+		summaryText: bundle.summaryText,
+		profile: bundle.profile,
+		gaps: bundle.gaps,
+		hiddenRequirements: bundle.hiddenRequirements,
+		nextTurnStance: bundle.nextTurnStance,
+		trickleInstructions: bundle.trickle?.priorityInstructions ?? [],
+		retrievalAnchors: bundle.trickle?.retrievalAnchors ?? [],
+		memoryItems: bundle.memory.map((item) => item.itemText),
+		deterministicReply: bundle.deterministicReply,
+		correctionSummary: bundle.deterministicCorrectionSummary,
+	}
+}
+
 export function buildBalloonRepairBundle(
 	store: BalloonStateStore,
 	sessionId: string,
 	options?: {
 		userRequest?: string
 		latestResponse?: string
+		semanticMode?: unknown
+		semanticAdapterPath?: unknown
+		semanticTimeoutMs?: unknown
+		semanticMaxNotes?: unknown
 	},
 ): BalloonRepairBundle | null {
 	const turns = store.getTurns(sessionId, 100)
@@ -312,14 +353,37 @@ export function buildBalloonRepairBundle(
 	const memory = store.getMemoryLedger(sessionId).slice(0, 5)
 	const summaryText = buildSessionSummaryText(store, sessionId)
 	const nextTurnStance = buildNextTurnStance(profile, hiddenRequirements, trickle)
-	const messages = buildRepairPromptMessages(summaryText, profile, gaps, trickle, memory, latestUserRequest)
-	const repairedReply = buildDeterministicRepairedReply(latestUserRequest, profile, hiddenRequirements, gaps, nextTurnStance)
-	const correctionSummary = buildCorrectionSummary(gaps, hiddenRequirements, profile)
+	const deterministicReply = buildDeterministicRepairedReply(latestUserRequest, profile, hiddenRequirements, gaps, nextTurnStance)
+	const deterministicCorrectionSummary = buildCorrectionSummary(gaps, hiddenRequirements, profile)
+	const semanticCaraConfig = resolveSemanticCaraConfig({
+		mode: options?.semanticMode,
+		adapterPath: options?.semanticAdapterPath,
+		timeoutMs: options?.semanticTimeoutMs,
+		maxNotes: options?.semanticMaxNotes,
+	})
+	const semanticCaraPacket = buildSemanticCaraPacket({
+		sessionId,
+		requestText: latestUserRequest,
+		latestResponse: latestResponse ?? null,
+		summaryText,
+		profile,
+		gaps,
+		hiddenRequirements,
+		nextTurnStance,
+		trickle,
+		memory,
+		deterministicReply,
+		deterministicCorrectionSummary,
+	})
+	const semanticCara = runSemanticCara(semanticCaraPacket, semanticCaraConfig)
+	const merged = mergeSemanticRepair(semanticCaraPacket, semanticCara)
+	const messages = buildRepairPromptMessages(summaryText, profile, gaps, trickle, memory, semanticCara, latestUserRequest)
 
 	return {
 		sessionId,
 		summaryText,
 		requestText: latestUserRequest,
+		latestResponse: latestResponse ?? null,
 		profile,
 		hiddenRequirements,
 		gaps,
@@ -327,7 +391,11 @@ export function buildBalloonRepairBundle(
 		memory,
 		nextTurnStance,
 		messages,
-		repairedReply,
-		correctionSummary,
+		deterministicReply,
+		repairedReply: merged.repairedReply,
+		deterministicCorrectionSummary,
+		correctionSummary: merged.correctionSummary,
+		semanticCaraConfig,
+		semanticCara,
 	}
 }

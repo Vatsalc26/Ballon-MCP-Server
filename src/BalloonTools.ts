@@ -1,4 +1,4 @@
-import type { BalloonGap, BalloonSessionSummary, HiddenRequirement, ProxyTrickle, RetrievalHit, StructuredProfile } from "./types"
+import type { BalloonGap, BalloonSessionSummary, HiddenRequirement, ProxyTrickle, RetrievalHit, SemanticCaraResult, StructuredProfile } from "./types"
 import { BalloonStateStore } from "./BalloonStateStore"
 import { auditLatestTurn, buildProxyTrickle, buildStructuredProfile, detectHiddenRequirements, retrieveRelevantTurns, summarizeMemoryPromotion } from "./BalloonAnalysis"
 import { buildBalloonRepairBundle } from "./BalloonRepair"
@@ -113,6 +113,21 @@ function formatRetrievalHits(hits: RetrievalHit[]): string {
 
 function formatTrickle(trickle: ProxyTrickle): string {
 	return [trickle.summary, "", trickle.deliveryText].join("\n")
+}
+
+function formatSemanticCara(result: SemanticCaraResult): string {
+	if (result.status === "disabled") return "Semantic CARA disabled."
+	const lines = [
+		`Status: ${result.status}`,
+		`Mode: ${result.mode}`,
+		`Source: ${result.providerMeta.source}`,
+		`Duration: ${result.providerMeta.durationMs} ms`,
+		...(result.providerMeta.adapterPath ? [`Adapter: ${result.providerMeta.adapterPath}`] : []),
+		...(result.notes.length > 0 ? ["Notes:", ...result.notes.map((note, index) => `${index + 1}. ${note}`)] : ["Notes: none"]),
+		...(result.suggestedAdditions.length > 0 ? ["Suggested additions:", ...result.suggestedAdditions.map((item, index) => `${index + 1}. ${item}`)] : []),
+		...(result.error ? [`Error: ${result.error}`] : []),
+	]
+	return lines.join("\n")
 }
 
 function buildNextTurnStance(profile: StructuredProfile, hiddenRequirements: HiddenRequirement[], trickle: ProxyTrickle): string[] {
@@ -417,6 +432,10 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					sessionId: { type: "string", description: "Stable Balloon session id." },
 					userRequest: { type: "string", description: "Optional explicit user request to repair against." },
 					latestResponse: { type: "string", description: "Optional explicit latest assistant response to audit before building the repair packet." },
+					semanticMode: { type: "string", enum: ["off", "shadow", "assist"], description: "Optional semantic CARA mode override for this repair call." },
+					semanticAdapterPath: { type: "string", description: "Optional path to a semantic CARA adapter executable or .js/.mjs file." },
+					semanticTimeoutMs: { type: "number", description: "Optional semantic CARA adapter timeout in milliseconds." },
+					semanticMaxNotes: { type: "number", description: "Optional cap on semantic CARA notes returned." },
 				},
 			},
 			run: (args, context) => {
@@ -425,6 +444,10 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 				const bundle = buildBalloonRepairBundle(context.store, sessionId, {
 					userRequest: asString(args.userRequest) ?? undefined,
 					latestResponse: asString(args.latestResponse) ?? undefined,
+					semanticMode: args.semanticMode,
+					semanticAdapterPath: args.semanticAdapterPath,
+					semanticTimeoutMs: args.semanticTimeoutMs,
+					semanticMaxNotes: args.semanticMaxNotes,
 				})
 				if (!bundle) return toolError(`Could not build a repair packet for session ${sessionId}. A user request and prior Balloon session state are required.`)
 				const text = [
@@ -435,6 +458,9 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					"",
 					"What Balloon corrected",
 					bundle.correctionSummary,
+					"",
+					"Semantic CARA",
+					formatSemanticCara(bundle.semanticCara),
 					"",
 					"Suggested next-turn stance",
 					formatList(bundle.nextTurnStance, "No additional next-turn guidance generated."),
@@ -447,8 +473,71 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					gaps: bundle.gaps,
 					trickle: bundle.trickle,
 					nextTurnStance: bundle.nextTurnStance,
+					deterministicReply: bundle.deterministicReply,
+					repairedReply: bundle.repairedReply,
+					deterministicCorrectionSummary: bundle.deterministicCorrectionSummary,
+					correctionSummary: bundle.correctionSummary,
+					semanticCaraConfig: bundle.semanticCaraConfig,
+					semanticCara: bundle.semanticCara,
+					promptMessages: bundle.messages,
+				})
+			},
+		},
+		{
+			name: "balloon_semantic_cara_preview",
+			title: "Preview Semantic CARA",
+			description: "Builds the repair packet, shows the deterministic baseline, and runs the optional semantic CARA lane in shadow or assist mode.",
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["sessionId"],
+				properties: {
+					sessionId: { type: "string", description: "Stable Balloon session id." },
+					userRequest: { type: "string", description: "Optional explicit user request to repair against." },
+					latestResponse: { type: "string", description: "Optional explicit latest assistant response to audit before building the repair packet." },
+					semanticMode: { type: "string", enum: ["off", "shadow", "assist"], description: "Semantic CARA mode for this preview run." },
+					semanticAdapterPath: { type: "string", description: "Optional path to a semantic CARA adapter executable or .js/.mjs file." },
+					semanticTimeoutMs: { type: "number", description: "Optional semantic CARA adapter timeout in milliseconds." },
+					semanticMaxNotes: { type: "number", description: "Optional cap on semantic CARA notes returned." },
+				},
+			},
+			run: (args, context) => {
+				const sessionId = asString(args.sessionId)
+				if (!sessionId) return toolError("sessionId is required.")
+				const bundle = buildBalloonRepairBundle(context.store, sessionId, {
+					userRequest: asString(args.userRequest) ?? undefined,
+					latestResponse: asString(args.latestResponse) ?? undefined,
+					semanticMode: args.semanticMode,
+					semanticAdapterPath: args.semanticAdapterPath,
+					semanticTimeoutMs: args.semanticTimeoutMs,
+					semanticMaxNotes: args.semanticMaxNotes,
+				})
+				if (!bundle) return toolError(`Could not build a semantic preview packet for session ${sessionId}.`)
+				const text = [
+					"Balloon semantic CARA preview ready.",
+					"",
+					"Deterministic repaired reply",
+					bundle.deterministicReply,
+					"",
+					"Effective repaired reply",
+					bundle.repairedReply,
+					"",
+					"Semantic CARA",
+					formatSemanticCara(bundle.semanticCara),
+				].join("\n")
+				return textResult(text, {
+					sessionId,
+					requestText: bundle.requestText,
+					latestResponse: bundle.latestResponse,
+					profile: bundle.profile,
+					gaps: bundle.gaps,
+					hiddenRequirements: bundle.hiddenRequirements,
+					nextTurnStance: bundle.nextTurnStance,
+					deterministicReply: bundle.deterministicReply,
 					repairedReply: bundle.repairedReply,
 					correctionSummary: bundle.correctionSummary,
+					semanticCaraConfig: bundle.semanticCaraConfig,
+					semanticCara: bundle.semanticCara,
 					promptMessages: bundle.messages,
 				})
 			},

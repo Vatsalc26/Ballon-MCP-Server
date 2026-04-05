@@ -45,6 +45,19 @@ Balloon MCP helps a host application:
 
 By design, the server returns analysis artifacts and corrective context. It does not patch your repo by itself.
 
+## Optional Hybrid Lane
+
+Balloon now has an optional hybrid semantic lane in addition to the deterministic base.
+
+That means:
+
+1. deterministic Balloon stays the stable benchmark anchor
+2. semantic CARA can be enabled as a shadow or assist mode
+3. developers can plug in their own model-backed adapter without changing the core server
+4. shadow mode is verified in the current smoke path, and assist mode is implemented and works when the host allows adapter process execution
+
+See [docs/SEMANTIC_CARA.md](./docs/SEMANTIC_CARA.md).
+
 ## Why It Feels Different
 
 A good Balloon run is not "more context" for its own sake.
@@ -87,8 +100,9 @@ Tools:
 5. `balloon_targeted_retrieval`
 6. `balloon_generate_proxy_trickle`
 7. `balloon_repair_next_turn`
-8. `balloon_update_memory_ledger`
-9. `balloon_explain_gap_report`
+8. `balloon_semantic_cara_preview`
+9. `balloon_update_memory_ledger`
+10. `balloon_explain_gap_report`
 
 Prompts:
 
@@ -127,9 +141,10 @@ If the demo feels good, the important part is not that Balloon produced more tex
 
 1. [Installation](./docs/INSTALL.md)
 2. [Demo workflow](./docs/DEMO_WORKFLOW.md)
-3. [Architecture roadmap](./docs/ROADMAP.md)
-4. [Contributing](./CONTRIBUTING.md)
-5. [Security policy](./SECURITY.md)
+3. [Semantic CARA](./docs/SEMANTIC_CARA.md)
+4. [Architecture roadmap](./docs/ROADMAP.md)
+5. [Contributing](./CONTRIBUTING.md)
+6. [Security policy](./SECURITY.md)
 
 ## Good Fit
 

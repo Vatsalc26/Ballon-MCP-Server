@@ -1,0 +1,5 @@
+{
+  "sessionId": "demo-session-alpha",
+  "userRequest": "Please add retry logic to the request layer without rewriting the current router. Keep type safety and include tests.",
+  "semanticMode": "shadow"
+}

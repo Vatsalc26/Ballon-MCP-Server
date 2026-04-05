@@ -6,6 +6,9 @@ All notable public changes to Balloon MCP should be recorded in this file.
 
 1. improved deterministic repair phrasing so repaired replies preserve direction more naturally
 2. benchmark pilot logging moved from plan-only to first recorded results in the private source-of-truth docs
+3. added the optional semantic CARA lane with `shadow` and `assist` modes
+4. added `balloon_semantic_cara_preview` for deterministic-vs-hybrid inspection
+5. documented the adapter contract, configuration flags, and current host-permission caveat for MCP-hosted assist mode
 
 ## 0.1.0-alpha.0 - 2026-04-05
 
