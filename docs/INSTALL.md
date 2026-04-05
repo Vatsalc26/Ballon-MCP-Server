@@ -44,8 +44,6 @@ Optional semantic CARA assist mode with an adapter:
 npm run balloon:mcp -- --semantic-cara-mode assist --semantic-cara-adapter .\examples\semantic_cara_adapter.example.mjs
 ```
 
-If your MCP host launches Balloon from a different working directory, the server now attempts a few package-relative resolutions for the example adapter path before failing.
-
 Note:
 
 1. shadow mode is the verified smoke-test path today

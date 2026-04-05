@@ -21,6 +21,7 @@ type SmokeResult = {
 	heroCyclePassed: boolean
 	repairFallbackWorked: boolean
 	semanticCaraPreviewWorked: boolean
+	semanticCaraAssistWorked: boolean
 	compareRepairLanesWorked: boolean
 	reviewDriftFallbackWorked: boolean
 	profileBuilt: boolean
@@ -43,14 +44,8 @@ function resolveRootDir(): string {
 	throw new Error(`Could not resolve repo root from ${__dirname}`)
 }
 
-function resolveVerificationDir(rootDir: string): string {
-	const monorepoDir = path.join(rootDir, "Ballon_architecture", "balloon_mcp_server", "verification")
-	if (fs.existsSync(monorepoDir)) return monorepoDir
-	return path.join(rootDir, "verification")
-}
-
 function createTempDataDir(rootDir: string): string {
-	const dir = path.join(resolveVerificationDir(rootDir), `.tmp-balloon-mcp-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+	const dir = path.join(rootDir, "verification", `.tmp-balloon-mcp-${Date.now()}-${Math.random().toString(16).slice(2)}`)
 	fs.mkdirSync(dir, { recursive: true })
 	return dir
 }
@@ -201,9 +196,7 @@ function hasPrompt(result: unknown, name: string): boolean {
 export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<SmokeResult> {
 	const details: string[] = []
 	const dataDir = createTempDataDir(rootDir)
-	const monorepoServerPath = path.join(rootDir, "dist", "Ballon_architecture", "balloon_mcp_server", "src", "start.js")
-	const publicRepoServerPath = path.join(rootDir, "dist", "src", "start.js")
-	const serverPath = fs.existsSync(monorepoServerPath) ? monorepoServerPath : publicRepoServerPath
+	const serverPath = path.join(rootDir, "dist", "src", "start.js")
 	const child = spawn(process.execPath, [serverPath, "--data-dir", dataDir], {
 		cwd: rootDir,
 		windowsHide: true,
@@ -310,6 +303,29 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			(semanticPreview.structuredContent?.semanticCara?.notes?.length ?? 0) >= 1
 		details.push(`semanticCaraPreviewWorked=${semanticCaraPreviewWorked ? "yes" : "no"}`)
 
+		const assistCompare = (await client.request("tools/call", {
+			name: "balloon_compare_repair_lanes",
+			arguments: {
+				sessionId: `${sessionId}-hero`,
+				userRequest: latestUserRequest,
+				semanticMode: "assist",
+				semanticAdapterPath: "./examples/semantic_cara_adapter.example.mjs",
+			},
+		})) as {
+			structuredContent?: {
+				hybridReply?: string
+				semanticCara?: { status?: string }
+			}
+		}
+		const assistHybridReply = assistCompare.structuredContent?.hybridReply ?? ""
+		const semanticCaraAssistWorked =
+			assistCompare.structuredContent?.semanticCara?.status === "assisted" &&
+			assistHybridReply.includes("src/critical/router.ts") &&
+			assistHybridReply.toLowerCase().includes("type safety") &&
+			assistHybridReply.toLowerCase().includes("test") &&
+			assistHybridReply.toLowerCase().includes("timeout alignment")
+		details.push(`semanticCaraAssistWorked=${semanticCaraAssistWorked ? "yes" : "no"}`)
+
 		const compareRepairLanes = (await client.request("tools/call", {
 			name: "balloon_compare_repair_lanes",
 			arguments: {
@@ -402,6 +418,7 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			heroCyclePassed,
 			repairFallbackWorked,
 			semanticCaraPreviewWorked,
+			semanticCaraAssistWorked,
 			compareRepairLanesWorked,
 			reviewDriftFallbackWorked,
 			profileBuilt,
@@ -426,6 +443,7 @@ export function formatBalloonMcpSmoke(result: SmokeResult): string {
 		`Hero cycle: ${result.heroCyclePassed ? "PASS" : "FAIL"}`,
 		`Repair fallback: ${result.repairFallbackWorked ? "PASS" : "FAIL"}`,
 		`Semantic CARA preview: ${result.semanticCaraPreviewWorked ? "PASS" : "FAIL"}`,
+		`Semantic CARA assist: ${result.semanticCaraAssistWorked ? "PASS" : "FAIL"}`,
 		`Compare repair lanes: ${result.compareRepairLanesWorked ? "PASS" : "FAIL"}`,
 		`Review drift fallback: ${result.reviewDriftFallbackWorked ? "PASS" : "FAIL"}`,
 		`Profile build: ${result.profileBuilt ? "PASS" : "FAIL"}`,
@@ -448,6 +466,7 @@ async function main(): Promise<void> {
 			result.heroCyclePassed &&
 			result.repairFallbackWorked &&
 			result.semanticCaraPreviewWorked &&
+			result.semanticCaraAssistWorked &&
 			result.compareRepairLanesWorked &&
 			result.reviewDriftFallbackWorked &&
 			result.profileBuilt &&

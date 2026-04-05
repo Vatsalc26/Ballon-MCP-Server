@@ -109,7 +109,6 @@ For a side-by-side deterministic vs hybrid comparison payload, see [../examples/
 Path note:
 
 1. in the standalone public repo, `.\examples\semantic_cara_adapter.example.mjs` is the normal path
-2. from other launch directories, Balloon now also attempts package-relative resolutions before failing
 
 That example is intentionally simple.
 
@@ -120,6 +119,7 @@ Its purpose is to show:
 1. the packet shape
 2. the expected return format
 3. how contributors can plug in their own model-backed logic
+4. how a hybrid reply can stay explicit about protected areas, architecture wording, verification obligations, and bounded next-step quality
 
 ## Recommended Use
 

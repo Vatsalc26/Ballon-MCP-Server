@@ -10,8 +10,10 @@ All notable public changes to Balloon MCP should be recorded in this file.
 4. added `balloon_semantic_cara_preview` for deterministic-vs-hybrid inspection
 5. documented the adapter contract, configuration flags, and current host-permission caveat for MCP-hosted assist mode
 6. added `balloon_compare_repair_lanes` and `balloon_review_session_drift` as host-reliability fallbacks for comparison and drift review
-7. improved semantic adapter path resolution across different repo layouts and launch directories
+7. improved semantic adapter path handling for assist-mode runs
 8. clarified lane comparison output so reply changes and semantic-signal changes are distinguished
+9. improved the example semantic adapter so assist-mode repairs preserve protected areas, architecture wording, verification obligations, and bounded next-step quality more explicitly
+10. scrubbed public docs/examples so the standalone repo no longer uses internal-layout language
 
 ## 0.1.0-alpha.0 - 2026-04-05
 

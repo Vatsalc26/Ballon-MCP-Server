@@ -182,9 +182,7 @@ function resolveAdapterPath(adapterPath: string): { resolvedPath: string | null;
 	const attemptedPaths = uniq(
 		[
 			path.resolve(process.cwd(), adapterPath),
-			path.resolve(process.cwd(), "public_pack", adapterPath),
-			path.resolve(process.cwd(), "Ballon_architecture", "balloon_mcp_server", adapterPath),
-			path.resolve(process.cwd(), "Ballon_architecture", "balloon_mcp_server", "public_pack", adapterPath),
+			path.resolve(process.cwd(), "examples", path.basename(adapterPath)),
 		],
 		8,
 	)

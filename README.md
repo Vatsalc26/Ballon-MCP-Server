@@ -141,8 +141,6 @@ If you want the drift-review prompt without relying on prompt routing, use `ball
 
 If you want to compare deterministic vs hybrid repair output directly, use `balloon_compare_repair_lanes`.
 
-If you are experimenting with semantic CARA adapters from different launch directories, Balloon now attempts a few sensible package-relative resolutions before failing.
-
 If the demo feels good, the important part is not that Balloon produced more text. The important part is that it preserved the existing direction and pushed the next reply back toward the user's real constraints.
 
 ## Documentation
