@@ -220,6 +220,11 @@ export function extractReleasedGuidance(packet: ReleasePacket, limit = 4): strin
 			.replace(/^Do not violate protected or excluded areas:\s*/iu, "")
 			.trim()
 		if (!text) continue
+		if (/verification obligation may be omitted/iu.test(text)) continue
+		if (/possible architecture drift/iu.test(text)) continue
+		if (/protected area may be contradicted/iu.test(text)) continue
+		if (/possible sycophantic drift signal/iu.test(text)) continue
+		if (/established context may be missing from the latest response/iu.test(text)) continue
 		if (/favor adversarial checking/i.test(text)) continue
 		if (/preserve the established architecture direction/i.test(text)) continue
 		if (/reconnect the next turn to established session context/i.test(text)) continue

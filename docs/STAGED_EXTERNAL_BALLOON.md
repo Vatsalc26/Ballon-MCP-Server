@@ -45,17 +45,34 @@ That tool returns:
 
 ## Thresholds
 
-Default turn thresholds are:
+The staged lane is not "3 balloons total."
 
-1. `3`
-2. `6`
-3. `10`
+It is `3` named balloon families that can re-inflate repeatedly across a long session:
+
+1. `early` runs every turn
+2. `mid` activates on cadence or pressure
+3. `deep` activates on longer cadence, persistence, or sustained depth
+
+Default staged cadence anchors are:
+
+1. `5`
+2. `15`
+3. `40`
+
+Read those as:
+
+1. `mid` can wake up every `5` turns, or earlier if gap pressure spikes
+2. `deep` can wake up every `15` turns, or earlier if persistent drift shows up
+3. after `40` turns, the session is deep enough that the deep balloon should stay active by default
 
 For short demos or benchmark scenarios, use `forceStageCount: 3` so the full staged path is visible even in a small session.
 
-Those defaults are intentionally low because they make the staged lane visible in short public demos.
+That means the product shape is:
 
-They are not necessarily the best everyday coding thresholds.
+1. early correction pressure on every turn
+2. periodic or pressure-triggered mid balloon passes
+3. periodic or persistence-triggered deep balloon passes
+4. sustained deep correction once the session is genuinely long-horizon
 
 ## Recommended Stage Strategy
 
@@ -75,9 +92,9 @@ Recommended profiles:
 
 That means:
 
-1. `early` catches the first visible drift
-2. `mid` starts doing more retrieval and hidden-requirement pressure
-3. `deep` becomes the longer-session selective-release lane
+1. `early` catches the first visible drift every turn
+2. `mid` starts doing more retrieval and hidden-requirement pressure on cadence and under pressure
+3. `deep` becomes the longer-session selective-release lane, and eventually stays on when the trajectory is long enough
 
 For a `100`-turn session, the point is not to create `100` balloons.
 

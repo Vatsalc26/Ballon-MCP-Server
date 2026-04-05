@@ -44,6 +44,12 @@ function joinPhraseList(values) {
 	return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`
 }
 
+function joinActionClauses(values) {
+	if (values.length === 0) return ""
+	if (values.length === 1) return values[0] ?? ""
+	return `${values.slice(0, -1).join("; ")}; and ${values[values.length - 1]}`
+}
+
 function collectVerificationItems(values) {
 	const flags = {
 		tests: false,
@@ -150,6 +156,12 @@ const verificationItems = collectVerificationItems([
 		: []),
 ])
 const followOnItems = uniq(hiddenRequirements.map((value) => cleanSentence(value)))
+const nextStepClauses = [
+	target ? `make only this bounded change: ${target}` : null,
+	verificationItems.length > 0 ? `keep ${joinPhraseList(verificationItems)} explicit` : null,
+	followOnItems.length > 0 ? `account for ${joinPhraseList(followOnItems.slice(0, 3))}` : null,
+	`leave ${protectedPath ?? "the broader architecture"} alone`,
+].filter(Boolean)
 
 const rewrittenReply = [
 	`I would preserve ${direction} and keep this change bounded.`,
@@ -157,12 +169,14 @@ const rewrittenReply = [
 	...(protectedPath ? [`I would avoid changing ${protectedPath} while making that improvement.`] : []),
 	...(verificationItems.length > 0 ? [`I would keep ${joinPhraseList(verificationItems)} explicit in the next step.`] : []),
 	...(followOnItems.length > 0 ? [`I would also account for ${joinPhraseList(followOnItems)}.`] : []),
+	...(nextStepClauses.length > 0 ? [`The smallest safe next step is to ${joinActionClauses(nextStepClauses)}.`] : []),
 ].join(" ")
 
 const response = {
 	notes: [
 		"Make the repair reply sound like a disciplined teammate, not a stitched-together rule dump.",
 		"Keep protected areas, architecture wording, verification obligations, and bounded next-step quality explicit in natural language.",
+		"Prefer the smallest safe next step over widening scope early.",
 	],
 	suggestedAdditions: uniq([...hiddenRequirements.slice(0, 2), ...nextTurnStance.slice(0, 2), ...verificationItems.slice(0, 2)], 6),
 	rewrittenReply,
