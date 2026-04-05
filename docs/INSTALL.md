@@ -127,9 +127,12 @@ If the install path still depends on extra verbal guidance, the public surface i
 6. `balloon_run_staged_cycle`
 7. `balloon_compare_benchmark_lanes`
 8. `balloon_run_long_session_benchmark`
-9. `balloon_review_session_drift`
-10. `balloon://sessions/{sessionId}/gaps`
-11. `balloon://sessions/{sessionId}/releases`
+9. `balloon_describe_slopcode_starter_suite`
+10. `balloon_prepare_slopcode_problem`
+11. `balloon_review_session_drift`
+12. `balloon://sessions/{sessionId}/gaps`
+13. `balloon://sessions/{sessionId}/releases`
+14. `balloon://benchmark/slopcode/starter-suite`
 
 If prompt invocation is inconsistent in your MCP host, prefer `balloon_repair_next_turn` for repeatable demos and benchmark runs.
 
@@ -144,3 +147,5 @@ If you want the four-lane comparison workflow, read [BENCHMARK_LANES.md](./BENCH
 If you want host-specific guidance beyond VS Code, read [HOST_COMPATIBILITY.md](./HOST_COMPATIBILITY.md).
 
 If you want the next longer-horizon evaluation path, read [LONG_SESSION_BENCHMARK.md](./LONG_SESSION_BENCHMARK.md).
+
+If you want the first real SCBench starter problems, read [SLOPCODEBENCH_STARTER_SUITE.md](./SLOPCODEBENCH_STARTER_SUITE.md).

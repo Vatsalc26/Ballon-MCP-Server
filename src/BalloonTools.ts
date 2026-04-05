@@ -8,6 +8,8 @@ import type {
 	ReleasePacket,
 	RetrievalHit,
 	SemanticCaraResult,
+	SlopCodeProblemPreparation,
+	SlopCodeStarterSuiteResult,
 	StagedBalloonResult,
 	StructuredProfile,
 } from "./types"
@@ -16,6 +18,7 @@ import { auditLatestTurn, buildProxyTrickle, buildStructuredProfile, detectHidde
 import { buildBalloonRepairBundle } from "./BalloonRepair"
 import { buildReviewPromptBundle } from "./BalloonPrompts"
 import { buildStagedBalloonResult } from "./BalloonStaged"
+import { buildSlopCodeProblemPreparation, buildSlopCodeStarterSuite } from "./SlopCodeBench"
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 type JsonRecord = Record<string, unknown>
@@ -350,6 +353,66 @@ function formatLongSessionCheckpoint(checkpoint: LongSessionBenchmarkCheckpoint)
 		"",
 		"Staged external Balloon reply",
 		checkpoint.comparison.stagedReply,
+	].join("\n")
+}
+
+function formatSlopCodeDatasetStatus(result: SlopCodeStarterSuiteResult["datasetStatus"]): string {
+	return [
+		`Dataset present: ${result.present ? "yes" : "no"}`,
+		`Verification status: ${result.verificationStatus}`,
+		`Git metadata present: ${result.hasGitMetadata ? "yes" : "no"}`,
+		`Dataset root: ${result.datasetRoot ?? "not found"}`,
+		...(result.warnings.length > 0 ? ["Warnings", ...result.warnings.map((warning, index) => `${index + 1}. ${warning}`)] : ["Warnings", "None"]),
+	].join("\n")
+}
+
+function formatSlopCodeStarterSuite(result: SlopCodeStarterSuiteResult): string {
+	const entryLines = result.entries.flatMap((entry, index) => [
+		`${index + 1}. ${entry.problemName} [${entry.category}, ${entry.difficulty}, checkpoints=${entry.checkpointCount}]`,
+		`Why it fits: ${entry.rationale}`,
+		`Checkpoint batch: ${entry.recommendedCheckpointBatch.join(", ")}`,
+		`Force staged count: ${entry.recommendedForceStageCount}`,
+		`Long-session thresholds: ${entry.recommendedLongSessionThresholds.join(" / ")}`,
+		`Anti-slop signals: ${entry.antiSlopSignals.join(" | ")}`,
+	])
+	return [
+		`${result.suiteName}`,
+		"",
+		formatSlopCodeDatasetStatus(result.datasetStatus),
+		"",
+		`Problem count: ${result.problemCount}`,
+		...entryLines,
+	].join("\n")
+}
+
+function formatSlopCodeProblemPreparation(result: SlopCodeProblemPreparation): string {
+	return [
+		`Problem: ${result.problemName}`,
+		`Category: ${result.entry.category}`,
+		`Difficulty: ${result.entry.difficulty}`,
+		`Checkpoint count: ${result.entry.checkpointCount}`,
+		`Recommended session id: ${result.recommendedSessionId}`,
+		`Recommended checkpoint batch: ${result.entry.recommendedCheckpointBatch.join(", ")}`,
+		`Force staged count: ${result.entry.recommendedForceStageCount}`,
+		`Long-session thresholds: ${result.entry.recommendedLongSessionThresholds.join(" / ")}`,
+		"",
+		"Dataset status",
+		formatSlopCodeDatasetStatus(result.datasetStatus),
+		"",
+		"Why Balloon should test here",
+		result.entry.rationale,
+		`Opening pressure: ${result.entry.openingPressure}`,
+		`Closing pressure: ${result.entry.closingPressure}`,
+		"",
+		"Checkpoint files",
+		...result.checkpointFiles.map((file) => `${file.checkpoint}. ${file.path ?? "(dataset missing)"} [${file.exists ? "found" : "missing"}]`),
+		"",
+		"Suggested procedure",
+		...result.recommendedInstructions.map((instruction, index) => `${index + 1}. ${instruction}`),
+		"",
+		"Suggested compare prompt",
+		result.suggestedCompareBenchmarkPrompt,
+		...(result.missingFiles.length > 0 ? ["", "Missing files", ...result.missingFiles.map((file, index) => `${index + 1}. ${file}`)] : []),
 	].join("\n")
 }
 
@@ -1048,6 +1111,45 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 			},
 		},
 		{
+			name: "balloon_describe_slopcode_starter_suite",
+			title: "Describe SlopCodeBench Starter Suite",
+			description: "Returns the verified first-pass SlopCodeBench problems Balloon should use for dataset-backed anti-drift benchmarking.",
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				properties: {
+					datasetRoot: { type: "string", description: "Optional local path to a SlopCodeBench snapshot or clone." },
+				},
+			},
+			run: (args) => {
+				const suite = buildSlopCodeStarterSuite(asString(args.datasetRoot) ?? undefined)
+				return textResult(formatSlopCodeStarterSuite(suite), suite as unknown as JsonRecord)
+			},
+		},
+		{
+			name: "balloon_prepare_slopcode_problem",
+			title: "Prepare SlopCodeBench Problem",
+			description: "Prepares one starter-suite SlopCodeBench problem for Balloon benchmarking, including checkpoint files, scoring focus, and the next compare-lanes prompt.",
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["problemName"],
+				properties: {
+					problemName: { type: "string", description: "Starter-suite problem name such as file_backup, execution_server, or trajectory_api." },
+					datasetRoot: { type: "string", description: "Optional local path to a SlopCodeBench snapshot or clone." },
+				},
+			},
+			run: (args) => {
+				const problemName = asString(args.problemName)
+				if (!problemName) return toolError("problemName is required.")
+				const preparation = buildSlopCodeProblemPreparation(problemName, asString(args.datasetRoot) ?? undefined)
+				if (!preparation) {
+					return toolError(`Unknown SlopCodeBench starter-suite problem: ${problemName}. Use balloon_describe_slopcode_starter_suite first.`)
+				}
+				return textResult(formatSlopCodeProblemPreparation(preparation), preparation as unknown as JsonRecord)
+			},
+		},
+		{
 			name: "balloon_review_session_drift",
 			title: "Review Session Drift",
 			description: "Tool-level fallback for the Balloon drift-review prompt. Packages recent gaps, trickles, and the exact review prompt messages without relying on MCP prompt routing.",
@@ -1149,7 +1251,26 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 }
 
 export function listBalloonResources(store: BalloonStateStore): ResourceDefinition[] {
-	return store.listSessionSummaries().flatMap((summary) => [
+	const starterSuite = buildSlopCodeStarterSuite()
+	const benchmarkResources: ResourceDefinition[] = [
+		{
+			uri: "balloon://benchmark/slopcode/starter-suite",
+			name: "slopcode-starter-suite",
+			title: "Balloon SlopCodeBench Starter Suite",
+			description: "Verified first-pass SlopCodeBench problems recommended for Balloon anti-drift benchmarking.",
+			mimeType: "application/json",
+		},
+		...starterSuite.entries.map((entry) => ({
+			uri: `balloon://benchmark/slopcode/problems/${entry.problemName}`,
+			name: `slopcode-${entry.problemName}`,
+			title: `SlopCodeBench Starter Problem (${entry.problemName})`,
+			description: "Preparation packet for a starter-suite SlopCodeBench problem.",
+			mimeType: "application/json",
+		})),
+	]
+	return [
+		...benchmarkResources,
+		...store.listSessionSummaries().flatMap((summary) => [
 		{
 			uri: `balloon://sessions/${summary.sessionId}/summary`,
 			name: `${summary.sessionId}-summary`,
@@ -1192,10 +1313,21 @@ export function listBalloonResources(store: BalloonStateStore): ResourceDefiniti
 			description: "Recent similarity-gated release packets.",
 			mimeType: "application/json",
 		},
-	])
+		]),
+	]
 }
 
 export function readBalloonResource(store: BalloonStateStore, uri: string): ResourceContent | null {
+	if (uri === "balloon://benchmark/slopcode/starter-suite") {
+		return { uri, mimeType: "application/json", text: JSON.stringify(buildSlopCodeStarterSuite(), null, 2) }
+	}
+	const problemMatch = /^balloon:\/\/benchmark\/slopcode\/problems\/([^/]+)$/u.exec(uri)
+	if (problemMatch) {
+		const problemName = problemMatch[1] ?? ""
+		const preparation = buildSlopCodeProblemPreparation(problemName)
+		if (!preparation) return null
+		return { uri, mimeType: "application/json", text: JSON.stringify(preparation, null, 2) }
+	}
 	const match = /^balloon:\/\/sessions\/([^/]+)\/(summary|profile|gaps|trickles|memory|releases)$/u.exec(uri)
 	if (!match) return null
 	const sessionId = match[1] ?? ""

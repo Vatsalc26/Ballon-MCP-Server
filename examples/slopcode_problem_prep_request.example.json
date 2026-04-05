@@ -1,0 +1,7 @@
+{
+  "tool": "balloon_prepare_slopcode_problem",
+  "arguments": {
+    "problemName": "file_backup",
+    "datasetRoot": "..\\slop-code-bench-main"
+  }
+}

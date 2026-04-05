@@ -25,6 +25,8 @@ type SmokeResult = {
 	compareRepairLanesWorked: boolean
 	stagedCycleWorked: boolean
 	benchmarkLaneCompareWorked: boolean
+	slopcodeStarterSuiteWorked: boolean
+	slopcodeProblemPrepWorked: boolean
 	reviewDriftFallbackWorked: boolean
 	profileBuilt: boolean
 	gapAuditWorked: boolean
@@ -234,6 +236,8 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			hasTool(toolsList, "balloon_run_staged_cycle") &&
 			hasTool(toolsList, "balloon_compare_benchmark_lanes") &&
 			hasTool(toolsList, "balloon_run_long_session_benchmark") &&
+			hasTool(toolsList, "balloon_describe_slopcode_starter_suite") &&
+			hasTool(toolsList, "balloon_prepare_slopcode_problem") &&
 			hasTool(toolsList, "balloon_review_session_drift")
 		details.push(`toolSurfacePassed=${toolSurfacePassed ? "yes" : "no"}`)
 
@@ -444,6 +448,40 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			Boolean(longSessionBenchmark.structuredContent?.executedCheckpoints?.[1]?.comparison?.stagedReply?.includes("The smallest safe next step"))
 		details.push(`longSessionBenchmarkWorked=${longSessionBenchmarkWorked ? "yes" : "no"}`)
 
+		const starterSuite = (await client.request("tools/call", {
+			name: "balloon_describe_slopcode_starter_suite",
+			arguments: {},
+		})) as {
+			structuredContent?: {
+				problemCount?: number
+				entries?: Array<{ problemName?: string }>
+			}
+		}
+		const slopcodeStarterSuiteWorked =
+			(starterSuite.structuredContent?.problemCount ?? 0) >= 3 &&
+			(starterSuite.structuredContent?.entries?.some((entry) => entry.problemName === "file_backup") ?? false)
+		details.push(`slopcodeStarterSuiteWorked=${slopcodeStarterSuiteWorked ? "yes" : "no"}`)
+
+		const problemPreparation = (await client.request("tools/call", {
+			name: "balloon_prepare_slopcode_problem",
+			arguments: {
+				problemName: "file_backup",
+			},
+		})) as {
+			structuredContent?: {
+				problemName?: string
+				entry?: { checkpointCount?: number }
+				recommendedSessionId?: string
+				checkpointFiles?: Array<{ checkpoint?: number }>
+			}
+		}
+		const slopcodeProblemPrepWorked =
+			problemPreparation.structuredContent?.problemName === "file_backup" &&
+			(problemPreparation.structuredContent?.entry?.checkpointCount ?? 0) >= 4 &&
+			Boolean(problemPreparation.structuredContent?.recommendedSessionId?.includes("scbench-file-backup")) &&
+			(problemPreparation.structuredContent?.checkpointFiles?.length ?? 0) >= 4
+		details.push(`slopcodeProblemPrepWorked=${slopcodeProblemPrepWorked ? "yes" : "no"}`)
+
 		const reviewDriftFallback = (await client.request("tools/call", {
 			name: "balloon_review_session_drift",
 			arguments: { sessionId: `${sessionId}-hero` },
@@ -500,6 +538,9 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 		details.push(`memoryLedgerUpdated=${memoryLedgerUpdated ? "yes" : "no"}`)
 
 		const resources = (await client.request("resources/list", {})) as { resources?: Array<{ uri?: string }> }
+		const starterSuiteUri = Array.isArray(resources.resources)
+			? resources.resources.find((resource) => resource?.uri === "balloon://benchmark/slopcode/starter-suite")?.uri
+			: undefined
 		const profileUri = Array.isArray(resources.resources)
 			? resources.resources.find((resource) => resource?.uri?.includes(sessionId) && resource?.uri?.endsWith("/profile"))?.uri
 			: undefined
@@ -509,10 +550,15 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 		const resourceRead = profileUri
 			? ((await client.request("resources/read", { uri: profileUri })) as { contents?: Array<{ text?: string }> })
 			: null
+		const starterSuiteResource = starterSuiteUri
+			? ((await client.request("resources/read", { uri: starterSuiteUri })) as { contents?: Array<{ text?: string }> })
+			: null
 		const releaseResource = releasesUri
 			? ((await client.request("resources/read", { uri: releasesUri })) as { contents?: Array<{ text?: string }> })
 			: null
-		const resourceReadWorked = Boolean(resourceRead?.contents?.[0]?.text?.includes(sessionId))
+		const resourceReadWorked =
+			Boolean(resourceRead?.contents?.[0]?.text?.includes(sessionId)) &&
+			Boolean(starterSuiteResource?.contents?.[0]?.text?.includes("file_backup"))
 		details.push(`resourceReadWorked=${resourceReadWorked ? "yes" : "no"}`)
 		const releaseResourceWorked = Boolean(releaseResource?.contents?.[0]?.text?.includes("\"packetId\""))
 		details.push(`releaseResourceWorked=${releaseResourceWorked ? "yes" : "no"}`)
@@ -528,6 +574,8 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			compareRepairLanesWorked,
 			stagedCycleWorked,
 			benchmarkLaneCompareWorked,
+			slopcodeStarterSuiteWorked,
+			slopcodeProblemPrepWorked,
 			reviewDriftFallbackWorked,
 			profileBuilt,
 			gapAuditWorked,

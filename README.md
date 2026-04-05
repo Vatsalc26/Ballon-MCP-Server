@@ -121,9 +121,11 @@ Tools:
 10. `balloon_run_staged_cycle`
 11. `balloon_compare_benchmark_lanes`
 12. `balloon_run_long_session_benchmark`
-13. `balloon_review_session_drift`
-14. `balloon_update_memory_ledger`
-15. `balloon_explain_gap_report`
+13. `balloon_describe_slopcode_starter_suite`
+14. `balloon_prepare_slopcode_problem`
+15. `balloon_review_session_drift`
+16. `balloon_update_memory_ledger`
+17. `balloon_explain_gap_report`
 
 Prompts:
 
@@ -138,6 +140,8 @@ Resources:
 4. `balloon://sessions/{sessionId}/trickles`
 5. `balloon://sessions/{sessionId}/memory`
 6. `balloon://sessions/{sessionId}/releases`
+7. `balloon://benchmark/slopcode/starter-suite`
+8. `balloon://benchmark/slopcode/problems/{problemName}`
 
 ## Getting Started
 
@@ -167,6 +171,8 @@ If you want the benchmark-safe four-lane comparison, use `balloon_compare_benchm
 
 If you want checkpointed long-session comparison in one tool call, use `balloon_run_long_session_benchmark`.
 
+If you want the first real SlopCodeBench starter-suite workflow, use `balloon_describe_slopcode_starter_suite` and `balloon_prepare_slopcode_problem`.
+
 If the demo feels good, the important part is not that Balloon produced more text. The important part is that it preserved the existing direction and pushed the next reply back toward the user's real constraints.
 
 ## Documentation
@@ -182,9 +188,10 @@ If the demo feels good, the important part is not that Balloon produced more tex
 9. [Latency and correction tax](./docs/LATENCY_AND_CORRECTION_TAX.md)
 10. [Benchmark lanes](./docs/BENCHMARK_LANES.md)
 11. [Long-session benchmark](./docs/LONG_SESSION_BENCHMARK.md)
-12. [Architecture roadmap](./docs/ROADMAP.md)
-13. [Contributing](./CONTRIBUTING.md)
-14. [Security policy](./SECURITY.md)
+12. [SlopCodeBench starter suite](./docs/SLOPCODEBENCH_STARTER_SUITE.md)
+13. [Architecture roadmap](./docs/ROADMAP.md)
+14. [Contributing](./CONTRIBUTING.md)
+15. [Security policy](./SECURITY.md)
 
 ## Good Fit
 

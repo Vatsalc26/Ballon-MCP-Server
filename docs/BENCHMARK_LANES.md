@@ -31,6 +31,8 @@ For short scenarios, pass:
 
 That makes the staged lane fully visible even when the session is only a few turns long.
 
+For the first real SCBench problems after the small pilot, start with [SLOPCODEBENCH_STARTER_SUITE.md](./SLOPCODEBENCH_STARTER_SUITE.md).
+
 ## What To Look For
 
 A strong Balloon result is not "more words."

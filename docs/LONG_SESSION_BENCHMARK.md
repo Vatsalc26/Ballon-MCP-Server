@@ -22,12 +22,24 @@ The helper for that is:
 node dist/verification/verify_slopcodebench_dataset.js --dataset-root "..\\slop-code-bench-main"
 ```
 
+After the dataset root passes, verify the selected starter problems too:
+
+```powershell
+node dist/verification/verify_slopcodebench_starter_suite.js --dataset-root "..\\slop-code-bench-main"
+```
+
 That check looks for:
 
 1. the official top-level repo layout
 2. README, pyproject, and citation markers
 3. benchmark configs, prompts, and problem/test markers
 4. whether the dataset is a commit-pinned clone or only a zip-style snapshot
+
+If you want the first recommended real-problem set after verification, use:
+
+1. [SLOPCODEBENCH_STARTER_SUITE.md](./SLOPCODEBENCH_STARTER_SUITE.md)
+2. `balloon_describe_slopcode_starter_suite`
+3. `balloon_prepare_slopcode_problem`
 
 ## What To Measure
 
@@ -101,10 +113,14 @@ Use these starting fixtures:
 1. [../examples/long_session_25_turns.example.json](../examples/long_session_25_turns.example.json)
 2. [../examples/long_session_50_turns.example.json](../examples/long_session_50_turns.example.json)
 3. [../examples/long_session_benchmark_request.example.json](../examples/long_session_benchmark_request.example.json)
+4. [../examples/slopcode_starter_suite_request.example.json](../examples/slopcode_starter_suite_request.example.json)
+5. [../examples/slopcode_problem_prep_request.example.json](../examples/slopcode_problem_prep_request.example.json)
 
 They are not "official benchmark wins."
 
 They are simply reproducible longer-session starting points.
+
+The first real-problem step after those fixtures is the verified SCBench starter suite, not a claim of benchmark victory.
 
 ## What Good Looks Like
 

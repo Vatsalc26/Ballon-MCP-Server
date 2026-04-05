@@ -23,6 +23,8 @@ All notable public changes to Balloon MCP should be recorded in this file.
 17. added `balloon_run_long_session_benchmark` so checkpointed `10 / 25 / 50` style runs can be repeated in one call
 18. added public long-session benchmark request examples and updated docs to point at the checkpoint runner
 19. added `verify_slopcodebench_dataset` so local SlopCodeBench snapshots can be checked against expected official repo markers before benchmarking
+20. added `balloon_describe_slopcode_starter_suite` and `balloon_prepare_slopcode_problem` so the first real SCBench starter problems are inspectable through MCP
+21. added `verify_slopcodebench_starter_suite` plus starter-suite docs/examples for `file_backup`, `execution_server`, and `trajectory_api`
 
 ## 0.1.0-alpha.0 - 2026-04-05
 

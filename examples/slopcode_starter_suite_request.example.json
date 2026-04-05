@@ -1,0 +1,6 @@
+{
+  "tool": "balloon_describe_slopcode_starter_suite",
+  "arguments": {
+    "datasetRoot": "..\\slop-code-bench-main"
+  }
+}

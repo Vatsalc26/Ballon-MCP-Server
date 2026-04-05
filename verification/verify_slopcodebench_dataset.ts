@@ -1,6 +1,8 @@
 import fs from "node:fs"
 import path from "node:path"
 
+import { getSlopCodeDatasetStatus, resolveSlopCodeBenchDatasetRoot } from "../src/SlopCodeBench"
+
 type DatasetVerification = {
 	datasetRoot: string
 	repoRoot: string
@@ -36,34 +38,15 @@ const README_MARKERS = [
 const PYPROJECT_MARKERS = ['name = "slop-code-bench"', '"slop-code" = "slop_code.entrypoints.cli:app"'] as const
 const CITATION_MARKERS = ["repository-code: \"https://github.com/SprocketLab/slop-code-bench\"", "doi: 10.5281/zenodo.19257129"] as const
 
-function resolveBalloonRoot(): string {
-	let current = path.resolve(__dirname)
-	for (let depth = 0; depth < 10; depth += 1) {
-		if (fs.existsSync(path.join(current, "src", "BalloonTools.ts"))) return current
-		const parent = path.dirname(current)
-		if (parent === current) break
-		current = parent
-	}
-	throw new Error(`Could not resolve Balloon MCP root from ${__dirname}`)
-}
-
-function parseDatasetRoot(balloonRoot: string): string {
+function parseDatasetRoot(): string {
 	const args = process.argv.slice(2)
 	for (let index = 0; index < args.length; index += 1) {
 		if (args[index] === "--dataset-root") {
 			const value = args[index + 1]
-			if (value) return path.resolve(value)
+			if (value) return path.resolve(process.cwd(), value)
 		}
 	}
-	const candidates = [
-		path.resolve(balloonRoot, "..", "slop-code-bench-main"),
-		path.resolve(balloonRoot, "..", "..", "slop-code-bench-main"),
-		path.resolve(process.cwd(), "slop-code-bench-main"),
-	]
-	for (const candidate of candidates) {
-		if (fs.existsSync(candidate)) return candidate
-	}
-	return candidates[0] ?? path.resolve(balloonRoot, "..", "slop-code-bench-main")
+	return resolveSlopCodeBenchDatasetRoot(undefined, process.cwd()) ?? path.resolve(process.cwd(), "slop-code-bench-main")
 }
 
 function readFileSafe(filePath: string): string {
@@ -86,6 +69,7 @@ function listNames(dirPath: string, onlyDirectories = false): string[] {
 function verifyDataset(datasetRoot: string, repoRoot: string): DatasetVerification {
 	const criticalMissing: string[] = []
 	const warnings: string[] = []
+	const datasetStatus = getSlopCodeDatasetStatus(datasetRoot, process.cwd())
 
 	if (!fs.existsSync(datasetRoot)) {
 		criticalMissing.push(`dataset root missing: ${datasetRoot}`)
@@ -128,11 +112,8 @@ function verifyDataset(datasetRoot: string, repoRoot: string): DatasetVerificati
 		if (!citationText.includes(marker)) criticalMissing.push(`citation marker not found: ${marker}`)
 	}
 
-	const hasGitMetadata = fs.existsSync(path.join(datasetRoot, ".git"))
-	if (!hasGitMetadata) {
-		warnings.push("dataset snapshot has no .git directory; this looks like a GitHub zip download rather than a commit-pinned clone")
-		warnings.push("top-level shape and marker files match the official repository, but exact commit provenance is still unpinned")
-	}
+	const hasGitMetadata = datasetStatus.hasGitMetadata
+	warnings.push(...datasetStatus.warnings)
 
 	const problemNames = listNames(path.join(datasetRoot, "problems"), true)
 	if (problemNames.length < 10) warnings.push(`problem count looks unusually low: ${problemNames.length}`)
@@ -181,8 +162,8 @@ function formatVerification(result: DatasetVerification): string {
 }
 
 function main(): void {
-	const repoRoot = resolveBalloonRoot()
-	const datasetRoot = parseDatasetRoot(repoRoot)
+	const repoRoot = process.cwd()
+	const datasetRoot = parseDatasetRoot()
 	const result = verifyDataset(datasetRoot, repoRoot)
 	console.log(formatVerification(result))
 	if (result.criticalMissing.length > 0) {

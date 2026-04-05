@@ -174,6 +174,59 @@ export interface LongSessionBenchmarkResult {
 	forceStageCount: number | null
 }
 
+export type SlopCodeDatasetVerificationStatus = "verified" | "partial" | "missing"
+
+export interface SlopCodeDatasetStatus {
+	datasetRoot: string | null
+	present: boolean
+	hasGitMetadata: boolean
+	verificationStatus: SlopCodeDatasetVerificationStatus
+	warnings: string[]
+}
+
+export interface SlopCodeStarterSuiteEntry {
+	problemName: string
+	category: string
+	difficulty: string
+	checkpointCount: number
+	entryFile: string
+	recommendedCheckpointBatch: number[]
+	recommendedForceStageCount: number
+	recommendedLongSessionThresholds: number[]
+	antiSlopSignals: string[]
+	rationale: string
+	openingPressure: string
+	closingPressure: string
+}
+
+export interface SlopCodeCheckpointFile {
+	checkpoint: number
+	path: string | null
+	exists: boolean
+}
+
+export interface SlopCodeStarterSuiteResult {
+	suiteName: string
+	datasetStatus: SlopCodeDatasetStatus
+	problemCount: number
+	entries: SlopCodeStarterSuiteEntry[]
+}
+
+export interface SlopCodeProblemPreparation {
+	problemName: string
+	datasetStatus: SlopCodeDatasetStatus
+	entry: SlopCodeStarterSuiteEntry
+	problemDir: string | null
+	configPath: string | null
+	staticAssetsPath: string | null
+	testsDirPath: string | null
+	checkpointFiles: SlopCodeCheckpointFile[]
+	missingFiles: string[]
+	recommendedSessionId: string
+	recommendedInstructions: string[]
+	suggestedCompareBenchmarkPrompt: string
+}
+
 export interface BalloonSessionSummary {
 	sessionId: string
 	turnCount: number

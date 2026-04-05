@@ -43,6 +43,7 @@ The honest current state is:
 3. VS Code-first host path
 4. install, demo, roadmap, contribution, and security docs
 5. first checkpointed long-session benchmark runner
+6. verified SlopCodeBench starter-suite tooling
 
 ## What Still Needs Work
 
@@ -50,6 +51,7 @@ The honest current state is:
 2. deeper benchmark coverage
 3. clearer latency and correction-tax notes
 4. smoother snap-in experience for non-expert users
+5. deeper dataset-backed reruns beyond the new SCBench starter suite
 
 ## Related Docs
 
@@ -63,4 +65,5 @@ The honest current state is:
 8. [Staged external Balloon](./STAGED_EXTERNAL_BALLOON.md)
 9. [Benchmark lanes](./BENCHMARK_LANES.md)
 10. [Long-session benchmark](./LONG_SESSION_BENCHMARK.md)
-11. [Roadmap](./ROADMAP.md)
+11. [SlopCodeBench starter suite](./SLOPCODEBENCH_STARTER_SUITE.md)
+12. [Roadmap](./ROADMAP.md)
