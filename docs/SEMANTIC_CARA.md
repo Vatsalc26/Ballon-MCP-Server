@@ -104,6 +104,8 @@ See [../examples/semantic_cara_adapter.example.mjs](../examples/semantic_cara_ad
 
 For a simple preview request payload, see [../examples/demo_semantic_preview_request.json](../examples/demo_semantic_preview_request.json).
 
+For a side-by-side deterministic vs hybrid comparison payload, see [../examples/demo_compare_repair_lanes_request.json](../examples/demo_compare_repair_lanes_request.json).
+
 That example is intentionally simple.
 
 It is not meant to be the final semantic adapter.

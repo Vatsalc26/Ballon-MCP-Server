@@ -9,6 +9,7 @@ All notable public changes to Balloon MCP should be recorded in this file.
 3. added the optional semantic CARA lane with `shadow` and `assist` modes
 4. added `balloon_semantic_cara_preview` for deterministic-vs-hybrid inspection
 5. documented the adapter contract, configuration flags, and current host-permission caveat for MCP-hosted assist mode
+6. added `balloon_compare_repair_lanes` and `balloon_review_session_drift` as host-reliability fallbacks for comparison and drift review
 
 ## 0.1.0-alpha.0 - 2026-04-05
 

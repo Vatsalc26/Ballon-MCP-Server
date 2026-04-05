@@ -110,8 +110,12 @@ If the install path still depends on private verbal guidance, the public surface
 2. `balloon/repair-next-turn`
 3. `balloon_repair_next_turn`
 4. `balloon_semantic_cara_preview`
-5. `balloon://sessions/{sessionId}/gaps`
+5. `balloon_compare_repair_lanes`
+6. `balloon_review_session_drift`
+7. `balloon://sessions/{sessionId}/gaps`
 
 If prompt invocation is inconsistent in your MCP host, prefer `balloon_repair_next_turn` for repeatable demos and benchmark runs.
+
+If you want the review prompt behavior without relying on prompt routing, prefer `balloon_review_session_drift`.
 
 If you want to experiment with the optional hybrid lane, read [SEMANTIC_CARA.md](./SEMANTIC_CARA.md).

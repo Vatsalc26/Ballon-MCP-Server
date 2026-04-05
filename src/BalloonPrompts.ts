@@ -22,6 +22,12 @@ export type PromptResult = {
 	messages: PromptMessage[]
 }
 
+export type ReviewPromptBundle = PromptResult & {
+	summaryText: string
+	gaps: ReturnType<BalloonStateStore["getRecentGaps"]>
+	trickles: ReturnType<BalloonStateStore["getRecentTrickles"]>
+}
+
 function asString(value: unknown): string | null {
 	return typeof value === "string" && value.trim().length > 0 ? value.trim() : null
 }
@@ -104,7 +110,7 @@ function buildRepairPrompt(store: BalloonStateStore, sessionId: string, userRequ
 	}
 }
 
-function buildReviewPrompt(store: BalloonStateStore, sessionId: string): PromptResult {
+export function buildReviewPromptBundle(store: BalloonStateStore, sessionId: string): ReviewPromptBundle {
 	const summary = buildSessionSummaryText(store, sessionId)
 	const gaps = store.getRecentGaps(sessionId, 8)
 	const trickles = store.getRecentTrickles(sessionId, 3)
@@ -133,6 +139,9 @@ function buildReviewPrompt(store: BalloonStateStore, sessionId: string): PromptR
 
 	return {
 		description: "Ask the host model to review current Balloon drift and explain the needed correction path.",
+		summaryText: summary,
+		gaps,
+		trickles,
 		messages: [
 			{
 				role: "user",
@@ -153,7 +162,7 @@ export function getBalloonPrompt(store: BalloonStateStore, name: string, rawArgs
 		case "balloon/repair-next-turn":
 			return buildRepairPrompt(store, sessionId, asString(rawArgs.userRequest) ?? undefined)
 		case "balloon/review-session-drift":
-			return buildReviewPrompt(store, sessionId)
+			return buildReviewPromptBundle(store, sessionId)
 		default:
 			return null
 	}

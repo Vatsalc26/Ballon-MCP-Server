@@ -2,6 +2,7 @@ import type { BalloonGap, BalloonSessionSummary, HiddenRequirement, ProxyTrickle
 import { BalloonStateStore } from "./BalloonStateStore"
 import { auditLatestTurn, buildProxyTrickle, buildStructuredProfile, detectHiddenRequirements, retrieveRelevantTurns, summarizeMemoryPromotion } from "./BalloonAnalysis"
 import { buildBalloonRepairBundle } from "./BalloonRepair"
+import { buildReviewPromptBundle } from "./BalloonPrompts"
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 type JsonRecord = Record<string, unknown>
@@ -128,6 +129,16 @@ function formatSemanticCara(result: SemanticCaraResult): string {
 		...(result.error ? [`Error: ${result.error}`] : []),
 	]
 	return lines.join("\n")
+}
+
+function formatPromptMessages(messages: Array<{ role: string; content?: { text?: string } }>): string {
+	if (messages.length === 0) return "No prompt messages generated."
+	return messages
+		.map((message, index) => {
+			const text = message.content?.text?.trim() ?? ""
+			return `${index + 1}. [${message.role}]\n${text || "(empty)"}`
+		})
+		.join("\n\n")
 }
 
 function buildNextTurnStance(profile: StructuredProfile, hiddenRequirements: HiddenRequirement[], trickle: ProxyTrickle): string[] {
@@ -538,6 +549,121 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					correctionSummary: bundle.correctionSummary,
 					semanticCaraConfig: bundle.semanticCaraConfig,
 					semanticCara: bundle.semanticCara,
+					promptMessages: bundle.messages,
+				})
+			},
+		},
+		{
+			name: "balloon_compare_repair_lanes",
+			title: "Compare Repair Lanes",
+			description: "Builds the deterministic repair reply and the hybrid semantic repair reply side by side for the same session.",
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["sessionId"],
+				properties: {
+					sessionId: { type: "string", description: "Stable Balloon session id." },
+					userRequest: { type: "string", description: "Optional explicit user request to repair against." },
+					latestResponse: { type: "string", description: "Optional explicit latest assistant response to audit before building the repair packet." },
+					semanticMode: { type: "string", enum: ["shadow", "assist"], description: "Hybrid lane mode for this comparison. Defaults to shadow." },
+					semanticAdapterPath: { type: "string", description: "Optional path to a semantic CARA adapter executable or .js/.mjs file." },
+					semanticTimeoutMs: { type: "number", description: "Optional semantic CARA adapter timeout in milliseconds." },
+					semanticMaxNotes: { type: "number", description: "Optional cap on semantic CARA notes returned." },
+				},
+			},
+			run: (args, context) => {
+				const sessionId = asString(args.sessionId)
+				if (!sessionId) return toolError("sessionId is required.")
+				const deterministic = buildBalloonRepairBundle(context.store, sessionId, {
+					userRequest: asString(args.userRequest) ?? undefined,
+					latestResponse: asString(args.latestResponse) ?? undefined,
+					semanticMode: "off",
+				})
+				if (!deterministic) return toolError(`Could not build a deterministic repair packet for session ${sessionId}.`)
+				const hybrid = buildBalloonRepairBundle(context.store, sessionId, {
+					userRequest: asString(args.userRequest) ?? undefined,
+					latestResponse: asString(args.latestResponse) ?? undefined,
+					semanticMode: asString(args.semanticMode) ?? "shadow",
+					semanticAdapterPath: args.semanticAdapterPath,
+					semanticTimeoutMs: args.semanticTimeoutMs,
+					semanticMaxNotes: args.semanticMaxNotes,
+				})
+				if (!hybrid) return toolError(`Could not build a hybrid repair packet for session ${sessionId}.`)
+				const laneChanged =
+					deterministic.repairedReply.trim() !== hybrid.repairedReply.trim() ||
+					hybrid.semanticCara.notes.length > 0 ||
+					hybrid.semanticCara.status !== "disabled"
+				const text = [
+					"Balloon repair lane comparison ready.",
+					"",
+					"Deterministic repaired reply",
+					deterministic.repairedReply,
+					"",
+					"Hybrid repaired reply",
+					hybrid.repairedReply,
+					"",
+					"Semantic CARA",
+					formatSemanticCara(hybrid.semanticCara),
+					"",
+					"Lane delta",
+					laneChanged ? "Hybrid lane produced additional semantic signal for this session." : "Hybrid lane did not materially change the repaired output for this session.",
+				].join("\n")
+				return textResult(text, {
+					sessionId,
+					requestText: hybrid.requestText,
+					latestResponse: hybrid.latestResponse,
+					profile: hybrid.profile,
+					gaps: hybrid.gaps,
+					hiddenRequirements: hybrid.hiddenRequirements,
+					nextTurnStance: hybrid.nextTurnStance,
+					deterministicReply: deterministic.repairedReply,
+					deterministicCorrectionSummary: deterministic.correctionSummary,
+					hybridReply: hybrid.repairedReply,
+					hybridCorrectionSummary: hybrid.correctionSummary,
+					laneChanged,
+					semanticCaraConfig: hybrid.semanticCaraConfig,
+					semanticCara: hybrid.semanticCara,
+					promptMessages: hybrid.messages,
+				})
+			},
+		},
+		{
+			name: "balloon_review_session_drift",
+			title: "Review Session Drift",
+			description: "Tool-level fallback for the Balloon drift-review prompt. Packages recent gaps, trickles, and the exact review prompt messages without relying on MCP prompt routing.",
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["sessionId"],
+				properties: {
+					sessionId: { type: "string", description: "Stable Balloon session id." },
+				},
+			},
+			run: (args, context) => {
+				const sessionId = asString(args.sessionId)
+				if (!sessionId) return toolError("sessionId is required.")
+				const bundle = buildReviewPromptBundle(context.store, sessionId)
+				const trickleLines = bundle.trickles.map((trickle) => `${trickle.summary} -> ${trickle.priorityInstructions.join("; ")}`)
+				const text = [
+					"Balloon drift-review packet ready.",
+					"",
+					"Session summary",
+					bundle.summaryText,
+					"",
+					"Recent gaps",
+					formatGaps(bundle.gaps),
+					"",
+					"Recent proxy trickles",
+					formatList(trickleLines, "No recent trickles recorded."),
+					"",
+					"Review prompt messages",
+					formatPromptMessages(bundle.messages),
+				].join("\n")
+				return textResult(text, {
+					sessionId,
+					summaryText: bundle.summaryText,
+					gaps: bundle.gaps,
+					trickles: bundle.trickles,
 					promptMessages: bundle.messages,
 				})
 			},

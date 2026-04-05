@@ -101,8 +101,10 @@ Tools:
 6. `balloon_generate_proxy_trickle`
 7. `balloon_repair_next_turn`
 8. `balloon_semantic_cara_preview`
-9. `balloon_update_memory_ledger`
-10. `balloon_explain_gap_report`
+9. `balloon_compare_repair_lanes`
+10. `balloon_review_session_drift`
+11. `balloon_update_memory_ledger`
+12. `balloon_explain_gap_report`
 
 Prompts:
 
@@ -134,6 +136,10 @@ The recommended first demo is intentionally small:
 3. Balloon produces a gap report, a proxy trickle, and a sharper next-turn repair path
 
 If your MCP host is unreliable about prompt invocation, use `balloon_repair_next_turn` as the tool-level fallback. It returns the repair packet and a deterministic repaired reply, which makes demos and benchmarks more repeatable.
+
+If you want the drift-review prompt without relying on prompt routing, use `balloon_review_session_drift`.
+
+If you want to compare deterministic vs hybrid repair output directly, use `balloon_compare_repair_lanes`.
 
 If the demo feels good, the important part is not that Balloon produced more text. The important part is that it preserved the existing direction and pushed the next reply back toward the user's real constraints.
 

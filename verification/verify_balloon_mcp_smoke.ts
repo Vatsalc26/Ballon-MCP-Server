@@ -21,6 +21,8 @@ type SmokeResult = {
 	heroCyclePassed: boolean
 	repairFallbackWorked: boolean
 	semanticCaraPreviewWorked: boolean
+	compareRepairLanesWorked: boolean
+	reviewDriftFallbackWorked: boolean
 	profileBuilt: boolean
 	gapAuditWorked: boolean
 	trickleGenerated: boolean
@@ -227,7 +229,9 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			hasTool(toolsList, "balloon_audit_turn") &&
 			hasTool(toolsList, "balloon_generate_proxy_trickle") &&
 			hasTool(toolsList, "balloon_repair_next_turn") &&
-			hasTool(toolsList, "balloon_semantic_cara_preview")
+			hasTool(toolsList, "balloon_semantic_cara_preview") &&
+			hasTool(toolsList, "balloon_compare_repair_lanes") &&
+			hasTool(toolsList, "balloon_review_session_drift")
 		details.push(`toolSurfacePassed=${toolSurfacePassed ? "yes" : "no"}`)
 
 		const promptsList = await client.request("prompts/list", {})
@@ -306,6 +310,44 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			(semanticPreview.structuredContent?.semanticCara?.notes?.length ?? 0) >= 1
 		details.push(`semanticCaraPreviewWorked=${semanticCaraPreviewWorked ? "yes" : "no"}`)
 
+		const compareRepairLanes = (await client.request("tools/call", {
+			name: "balloon_compare_repair_lanes",
+			arguments: {
+				sessionId: `${sessionId}-hero`,
+				userRequest: latestUserRequest,
+				semanticMode: "shadow",
+			},
+		})) as {
+			structuredContent?: {
+				deterministicReply?: string
+				hybridReply?: string
+				laneChanged?: boolean
+				semanticCara?: { status?: string }
+			}
+		}
+		const compareRepairLanesWorked =
+			Boolean(compareRepairLanes.structuredContent?.deterministicReply?.includes("I would")) &&
+			Boolean(compareRepairLanes.structuredContent?.hybridReply?.includes("I would")) &&
+			Boolean(compareRepairLanes.structuredContent?.laneChanged) &&
+			compareRepairLanes.structuredContent?.semanticCara?.status === "shadow"
+		details.push(`compareRepairLanesWorked=${compareRepairLanesWorked ? "yes" : "no"}`)
+
+		const reviewDriftFallback = (await client.request("tools/call", {
+			name: "balloon_review_session_drift",
+			arguments: { sessionId: `${sessionId}-hero` },
+		})) as {
+			structuredContent?: {
+				summaryText?: string
+				gaps?: Array<{ type?: string }>
+				promptMessages?: Array<{ content?: { text?: string } }>
+			}
+		}
+		const reviewDriftFallbackWorked =
+			Boolean(reviewDriftFallback.structuredContent?.summaryText?.includes(`${sessionId}-hero`)) &&
+			(reviewDriftFallback.structuredContent?.gaps?.length ?? 0) >= 1 &&
+			(reviewDriftFallback.structuredContent?.promptMessages?.[0]?.content?.text?.includes("Drift class") ?? false)
+		details.push(`reviewDriftFallbackWorked=${reviewDriftFallbackWorked ? "yes" : "no"}`)
+
 		const buildProfile = (await client.request("tools/call", {
 			name: "balloon_build_profile",
 			arguments: {
@@ -360,6 +402,8 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			heroCyclePassed,
 			repairFallbackWorked,
 			semanticCaraPreviewWorked,
+			compareRepairLanesWorked,
+			reviewDriftFallbackWorked,
 			profileBuilt,
 			gapAuditWorked,
 			trickleGenerated,
@@ -382,6 +426,8 @@ export function formatBalloonMcpSmoke(result: SmokeResult): string {
 		`Hero cycle: ${result.heroCyclePassed ? "PASS" : "FAIL"}`,
 		`Repair fallback: ${result.repairFallbackWorked ? "PASS" : "FAIL"}`,
 		`Semantic CARA preview: ${result.semanticCaraPreviewWorked ? "PASS" : "FAIL"}`,
+		`Compare repair lanes: ${result.compareRepairLanesWorked ? "PASS" : "FAIL"}`,
+		`Review drift fallback: ${result.reviewDriftFallbackWorked ? "PASS" : "FAIL"}`,
 		`Profile build: ${result.profileBuilt ? "PASS" : "FAIL"}`,
 		`Gap audit: ${result.gapAuditWorked ? "PASS" : "FAIL"}`,
 		`Proxy trickle: ${result.trickleGenerated ? "PASS" : "FAIL"}`,
@@ -402,6 +448,8 @@ async function main(): Promise<void> {
 			result.heroCyclePassed &&
 			result.repairFallbackWorked &&
 			result.semanticCaraPreviewWorked &&
+			result.compareRepairLanesWorked &&
+			result.reviewDriftFallbackWorked &&
 			result.profileBuilt &&
 			result.gapAuditWorked &&
 			result.trickleGenerated &&

@@ -35,6 +35,7 @@ Then inspect:
 3. the memory ledger update
 4. the repair path: `balloon/repair-next-turn` or `balloon_repair_next_turn`
 5. the optional hybrid lane: `balloon_semantic_cara_preview`
+6. the side-by-side lane comparison: `balloon_compare_repair_lanes`
 
 ## Host-Tested Demo Prompts
 
@@ -116,6 +117,27 @@ Show me only:
 1. the deterministic repaired reply
 2. the effective repaired reply
 3. the semantic CARA notes
+```
+
+### Prompt 4: Compare Deterministic Vs Hybrid
+
+```text
+Use #balloon_compare_repair_lanes with:
+
+- sessionId: queenshift-command-safe-2
+- userRequest: I want to improve interrupted-run incident messaging in Queenshift so owners can understand what happened without broad refactoring of command handling.
+- semanticMode: shadow
+
+Return text only.
+Do not edit files.
+Do not apply patches.
+Do not run terminal commands.
+
+Show me only:
+1. the deterministic repaired reply
+2. the hybrid repaired reply
+3. the semantic CARA notes
+4. the lane delta
 ```
 
 ## Expected Outcome
