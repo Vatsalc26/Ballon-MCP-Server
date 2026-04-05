@@ -1,6 +1,7 @@
 import type { BalloonGap, BalloonSessionSummary, HiddenRequirement, ProxyTrickle, RetrievalHit, StructuredProfile } from "./types"
 import { BalloonStateStore } from "./BalloonStateStore"
 import { auditLatestTurn, buildProxyTrickle, buildStructuredProfile, detectHiddenRequirements, retrieveRelevantTurns, summarizeMemoryPromotion } from "./BalloonAnalysis"
+import { buildBalloonRepairBundle } from "./BalloonRepair"
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 type JsonRecord = Record<string, unknown>
@@ -402,6 +403,54 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 				const trickle = buildProxyTrickle(sessionId, gaps, hits)
 				context.store.saveTrickle(trickle)
 				return textResult(formatTrickle(trickle), { sessionId, trickle })
+			},
+		},
+		{
+			name: "balloon_repair_next_turn",
+			title: "Repair Next Turn",
+			description: "Tool-level fallback for the Balloon repair path. Builds the repair prompt packet and a deterministic repaired next-turn reply without relying on MCP prompt routing.",
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["sessionId"],
+				properties: {
+					sessionId: { type: "string", description: "Stable Balloon session id." },
+					userRequest: { type: "string", description: "Optional explicit user request to repair against." },
+					latestResponse: { type: "string", description: "Optional explicit latest assistant response to audit before building the repair packet." },
+				},
+			},
+			run: (args, context) => {
+				const sessionId = asString(args.sessionId)
+				if (!sessionId) return toolError("sessionId is required.")
+				const bundle = buildBalloonRepairBundle(context.store, sessionId, {
+					userRequest: asString(args.userRequest) ?? undefined,
+					latestResponse: asString(args.latestResponse) ?? undefined,
+				})
+				if (!bundle) return toolError(`Could not build a repair packet for session ${sessionId}. A user request and prior Balloon session state are required.`)
+				const text = [
+					"Balloon repair packet ready.",
+					"",
+					"Suggested repaired next assistant reply",
+					bundle.repairedReply,
+					"",
+					"What Balloon corrected",
+					bundle.correctionSummary,
+					"",
+					"Suggested next-turn stance",
+					formatList(bundle.nextTurnStance, "No additional next-turn guidance generated."),
+				].join("\n")
+				return textResult(text, {
+					sessionId,
+					requestText: bundle.requestText,
+					profile: bundle.profile,
+					hiddenRequirements: bundle.hiddenRequirements,
+					gaps: bundle.gaps,
+					trickle: bundle.trickle,
+					nextTurnStance: bundle.nextTurnStance,
+					repairedReply: bundle.repairedReply,
+					correctionSummary: bundle.correctionSummary,
+					promptMessages: bundle.messages,
+				})
 			},
 		},
 		{

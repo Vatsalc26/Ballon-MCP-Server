@@ -86,8 +86,9 @@ Tools:
 4. `balloon_detect_hidden_requirements`
 5. `balloon_targeted_retrieval`
 6. `balloon_generate_proxy_trickle`
-7. `balloon_update_memory_ledger`
-8. `balloon_explain_gap_report`
+7. `balloon_repair_next_turn`
+8. `balloon_update_memory_ledger`
+9. `balloon_explain_gap_report`
 
 Prompts:
 
@@ -116,7 +117,9 @@ The recommended first demo is intentionally small:
 
 1. earlier context says not to rewrite architecture and not to skip tests
 2. a later assistant turn confidently proposes a rewrite anyway
-3. Balloon produces a gap report, a proxy trickle, and a sharper next-turn repair prompt
+3. Balloon produces a gap report, a proxy trickle, and a sharper next-turn repair path
+
+If your MCP host is unreliable about prompt invocation, use `balloon_repair_next_turn` as the tool-level fallback. It returns the repair packet and a deterministic repaired reply, which makes demos and benchmarks more repeatable.
 
 If the demo feels good, the important part is not that Balloon produced more text. The important part is that it preserved the existing direction and pushed the next reply back toward the user's real constraints.
 

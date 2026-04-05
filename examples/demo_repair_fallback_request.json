@@ -1,0 +1,7 @@
+{
+  "name": "balloon_repair_next_turn",
+  "arguments": {
+    "sessionId": "queenshift-command-safe-2",
+    "userRequest": "I want to improve interrupted-run incident messaging in Queenshift so owners can understand what happened without broad refactoring of command handling."
+  }
+}

@@ -11,6 +11,7 @@ Highlights:
 1. working MCP server with tools, prompts, and resources
 2. `balloon_run_cycle` hero tool
 3. `balloon/repair-next-turn` and `balloon/review-session-drift`
-4. SQLite-backed profile, gap, trickle, and memory state
-5. VS Code host-tested alpha path
-6. public docs for install, demo, roadmap, contribution, and security
+4. `balloon_repair_next_turn` tool-level repair fallback
+5. SQLite-backed profile, gap, trickle, and memory state
+6. VS Code host-tested alpha path
+7. public docs for install, demo, roadmap, contribution, and security

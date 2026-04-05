@@ -1,0 +1,271 @@
+import { auditLatestTurn, buildProxyTrickle, buildStructuredProfile, detectHiddenRequirements, retrieveRelevantTurns } from "./BalloonAnalysis"
+import { BalloonStateStore } from "./BalloonStateStore"
+import type { BalloonGap, HiddenRequirement, MemoryLedgerItem, ProxyTrickle, StructuredProfile } from "./types"
+
+export type RepairPromptMessage = {
+	role: "user" | "assistant" | "system"
+	content: {
+		type: "text"
+		text: string
+	}
+}
+
+export type BalloonRepairBundle = {
+	sessionId: string
+	summaryText: string
+	requestText: string
+	profile: StructuredProfile
+	hiddenRequirements: HiddenRequirement[]
+	gaps: BalloonGap[]
+	trickle: ProxyTrickle | null
+	memory: MemoryLedgerItem[]
+	nextTurnStance: string[]
+	messages: RepairPromptMessage[]
+	repairedReply: string
+	correctionSummary: string
+}
+
+function asString(value: unknown): string | null {
+	return typeof value === "string" && value.trim().length > 0 ? value.trim() : null
+}
+
+function formatList(values: string[], fallback: string): string {
+	if (values.length === 0) return fallback
+	return values.map((value, index) => `${index + 1}. ${value}`).join("\n")
+}
+
+function buildSessionSummaryText(store: BalloonStateStore, sessionId: string): string {
+	const summary = store.getSessionSummary(sessionId)
+	if (!summary) return `Session: ${sessionId}\nTurns: 0\nGaps: 0\nTrickles: 0\nMemory items: 0\nLast updated: unknown`
+	return [
+		`Session: ${summary.sessionId}`,
+		`Turns: ${summary.turnCount}`,
+		`Gaps: ${summary.gapCount}`,
+		`Trickles: ${summary.trickleCount}`,
+		`Memory items: ${summary.memoryCount}`,
+		`Last updated: ${summary.lastUpdatedAt ?? "unknown"}`,
+	].join("\n")
+}
+
+function buildNextTurnStance(profile: StructuredProfile, hiddenRequirements: HiddenRequirement[], trickle: ProxyTrickle | null): string[] {
+	const missingRequirements = hiddenRequirements.filter((requirement) => !requirement.coveredByResponse).map((requirement) => requirement.requirement)
+	const architectureDirection = profile.architectureDirection.find((entry) => !profile.protectedAreas.includes(entry))
+	return [
+		...(profile.protectedAreas[0] ? [`Avoid changing: ${profile.protectedAreas[0]}`] : []),
+		...(architectureDirection ? [`Preserve direction: ${architectureDirection}`] : []),
+		...(profile.verificationObligations[0] ? [`Verify: ${profile.verificationObligations[0]}`] : []),
+		...(missingRequirements.length > 0 ? [`Include: ${missingRequirements.slice(0, 3).join(", ")}`] : []),
+		...(trickle?.priorityInstructions[0] ? [`Pressure: ${trickle.priorityInstructions[0]}`] : []),
+	].slice(0, 4)
+}
+
+function cleanSentence(value: string): string {
+	return value.trim().replace(/\s+/g, " ").replace(/[.]+$/u, "")
+}
+
+function stripRequestPrefix(text: string): string {
+	return text
+		.replace(/^(please|kindly)\s+/iu, "")
+		.replace(/^(i want to|i need to|we need to|we want to|can you|could you|help me)\s+/iu, "")
+		.trim()
+}
+
+function extractBoundedTarget(userRequest: string): string {
+	const firstSentence = userRequest.split(/(?<=[.!?])\s+/u)[0] ?? userRequest
+	const stripped = stripRequestPrefix(firstSentence)
+	const withoutClause = stripped.split(/\bwithout\b/iu)[0]?.trim() ?? stripped
+	return cleanSentence(withoutClause)
+}
+
+function isGenericProtectedArea(value: string): boolean {
+	return /\bdo not edit files\b/i.test(value) || /\bread-only reasoning test\b/i.test(value)
+}
+
+function extractProtectedPath(value: string): string | null {
+	const pathMatch = /\b(?:src|app|lib|tests?|docs|scripts)\/[A-Za-z0-9_./-]+/u.exec(value)
+	return pathMatch?.[0] ?? null
+}
+
+function joinPhraseList(values: string[]): string {
+	if (values.length === 0) return ""
+	if (values.length === 1) return values[0] ?? ""
+	if (values.length === 2) return `${values[0]} and ${values[1]}`
+	return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`
+}
+
+function buildRepairPromptMessages(
+	summary: string,
+	profile: StructuredProfile,
+	gaps: BalloonGap[],
+	trickle: ProxyTrickle | null,
+	memory: MemoryLedgerItem[],
+	requestText: string,
+): RepairPromptMessage[] {
+	const systemSections = [
+		"You are preparing the next assistant turn in a Balloon-governed session.",
+		"Your job is to restore context fidelity without taking control away from the user.",
+		"Use the stored profile, recent gaps, proxy trickle, and memory items as low-volume corrective pressure.",
+		"Do not mention Balloon, CARA, auditing, or trickle unless the user explicitly asks.",
+		"Prefer the smallest safe reply that gets the session back on track.",
+		"",
+		"Session summary",
+		summary,
+		"",
+		"Known goals",
+		formatList(profile.goals, "No explicit goals recorded."),
+		"",
+		"Known constraints",
+		formatList(profile.constraints, "No explicit constraints recorded."),
+		"",
+		"Protected areas",
+		formatList(profile.protectedAreas, "No protected areas recorded."),
+		"",
+		"Recent gaps to correct",
+		formatList(gaps.map((gap) => `${gap.title}: ${gap.description}`), "No recent gaps recorded."),
+		"",
+		"Proxy trickle instructions",
+		formatList(trickle?.priorityInstructions ?? [], "No proxy trickle instructions recorded."),
+		"",
+		"Reinforced memory items",
+		formatList(memory.map((item) => `${item.itemText} (${item.status})`), "No reinforced memory items recorded."),
+		"",
+		"Response requirements",
+		"1. Answer the current request directly.",
+		"2. Preserve established architecture, constraints, and protected areas.",
+		"3. Carry forward verification obligations when they matter to correctness.",
+		"4. Include material follow-on requirements if the current reply would otherwise miss them.",
+		"5. Avoid agreement-heavy filler and avoid broad rewrites unless the stored context explicitly requires them.",
+	]
+
+	return [
+		{
+			role: "system",
+			content: {
+				type: "text",
+				text: systemSections.join("\n"),
+			},
+		},
+		{
+			role: "user",
+			content: {
+				type: "text",
+				text: `Write only the next assistant reply for this request while preserving the stored context:\n\n${requestText}\n\nIf the current direction is drifted or unsafe, correct course briefly and propose the next bounded step.`,
+			},
+		},
+	]
+}
+
+function buildDeterministicRepairedReply(
+	requestText: string,
+	profile: StructuredProfile,
+	hiddenRequirements: HiddenRequirement[],
+	gaps: BalloonGap[],
+	nextTurnStance: string[],
+): string {
+	const target = extractBoundedTarget(requestText)
+	const preservedDirection = profile.architectureDirection.find((entry) => !profile.protectedAreas.includes(entry)) ?? profile.constraints.find((entry) => /\bpreserve\b|\bdo not rewrite\b|\bexisting architecture\b/i.test(entry))
+	const specificProtectedArea = profile.protectedAreas.find((entry) => !isGenericProtectedArea(entry))
+	const protectedPath = specificProtectedArea ? extractProtectedPath(specificProtectedArea) : null
+	const missingRequirements = hiddenRequirements.filter((requirement) => !requirement.coveredByResponse).map((requirement) => requirement.requirement).slice(0, 3)
+	const verificationNeeds = profile.verificationObligations.slice(0, 2)
+	const hasArchitectureDrift = gaps.some((gap) => gap.type === "architecture_drift" || gap.type === "temporal_drift")
+
+	const sentences: string[] = []
+
+	if (preservedDirection) {
+		sentences.push(`I would preserve ${cleanSentence(preservedDirection).replace(/^(Preserve|preserve)\s+/u, "").replace(/^(Do not|do not)\s+/u, "").replace(/^(Keep|keep)\s+/u, "").trim() || "the existing direction"} and keep this change bounded.`)
+	} else {
+		sentences.push("I would keep this change bounded to the existing direction rather than starting with a broader rewrite.")
+	}
+
+	if (target) {
+		const targetSentence = hasArchitectureDrift
+			? `I would focus directly on ${target} instead of starting with a larger refactor.`
+			: `I would focus directly on ${target}.`
+		sentences.push(targetSentence)
+	}
+
+	if (protectedPath) {
+		sentences.push(`I would avoid changing ${protectedPath} while making that improvement.`)
+	}
+
+	const followOns = [...missingRequirements, ...verificationNeeds].slice(0, 4)
+	if (followOns.length > 0) {
+		sentences.push(`I would also carry forward ${joinPhraseList(followOns.map((value) => cleanSentence(value)))}.`)
+	}
+
+	if (sentences.length === 0 && nextTurnStance.length > 0) {
+		sentences.push(`I would follow the stored Balloon guidance: ${joinPhraseList(nextTurnStance.map((entry) => cleanSentence(entry)))}.`)
+	}
+
+	return sentences.join(" ")
+}
+
+function buildCorrectionSummary(gaps: BalloonGap[], hiddenRequirements: HiddenRequirement[], profile: StructuredProfile): string {
+	const corrections: string[] = []
+	if (gaps.some((gap) => gap.type === "architecture_drift" || gap.type === "temporal_drift")) corrections.push("preserving the earlier architecture direction")
+	if (profile.verificationObligations.length > 0 || gaps.some((gap) => gap.type === "constraint_omission")) corrections.push("reintroducing verification obligations")
+	if (hiddenRequirements.some((requirement) => !requirement.coveredByResponse)) corrections.push("surfacing missing follow-on requirements")
+	if (gaps.some((gap) => gap.type === "sycophantic_drift")) corrections.push("removing agreement-heavy phrasing")
+	if (corrections.length === 0) return "Balloon found little to correct beyond keeping the next reply aligned to the stored session context."
+	return `Balloon corrected the path by ${joinPhraseList(corrections)}.`
+}
+
+export function buildBalloonRepairBundle(
+	store: BalloonStateStore,
+	sessionId: string,
+	options?: {
+		userRequest?: string
+		latestResponse?: string
+	},
+): BalloonRepairBundle | null {
+	const turns = store.getTurns(sessionId, 100)
+	const profile = buildStructuredProfile(sessionId, turns)
+	store.saveProfile(profile)
+
+	const latestUserRequest =
+		asString(options?.userRequest) ??
+		turns
+			.filter((turn) => turn.role === "user")
+			.slice(-1)[0]?.content ??
+		null
+	const latestResponse =
+		asString(options?.latestResponse) ??
+		turns
+			.filter((turn) => turn.role === "assistant")
+			.slice(-1)[0]?.content ??
+		null
+
+	if (!latestUserRequest) return null
+
+	const hiddenRequirements = detectHiddenRequirements(latestUserRequest, latestResponse ?? undefined).filter((requirement) => !requirement.coveredByResponse)
+	const gaps = latestResponse ? auditLatestTurn(sessionId, profile, latestResponse, latestUserRequest) : store.getRecentGaps(sessionId, 5)
+	if (gaps.length > 0) store.saveGaps(sessionId, gaps)
+
+	const retrievalQueries = [...gaps.flatMap((gap) => [gap.title, gap.description, ...gap.suggestedQueries]), ...hiddenRequirements.map((requirement) => requirement.requirement)]
+	const hits = retrieveRelevantTurns(turns, retrievalQueries, 4)
+	const trickle = gaps.length > 0 ? buildProxyTrickle(sessionId, gaps, hits) : null
+	if (trickle) store.saveTrickle(trickle)
+
+	const memory = store.getMemoryLedger(sessionId).slice(0, 5)
+	const summaryText = buildSessionSummaryText(store, sessionId)
+	const nextTurnStance = buildNextTurnStance(profile, hiddenRequirements, trickle)
+	const messages = buildRepairPromptMessages(summaryText, profile, gaps, trickle, memory, latestUserRequest)
+	const repairedReply = buildDeterministicRepairedReply(latestUserRequest, profile, hiddenRequirements, gaps, nextTurnStance)
+	const correctionSummary = buildCorrectionSummary(gaps, hiddenRequirements, profile)
+
+	return {
+		sessionId,
+		summaryText,
+		requestText: latestUserRequest,
+		profile,
+		hiddenRequirements,
+		gaps,
+		trickle,
+		memory,
+		nextTurnStance,
+		messages,
+		repairedReply,
+		correctionSummary,
+	}
+}

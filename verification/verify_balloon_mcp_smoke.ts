@@ -19,6 +19,7 @@ type SmokeResult = {
 	toolSurfacePassed: boolean
 	promptSurfacePassed: boolean
 	heroCyclePassed: boolean
+	repairFallbackWorked: boolean
 	profileBuilt: boolean
 	gapAuditWorked: boolean
 	trickleGenerated: boolean
@@ -223,7 +224,8 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			hasTool(toolsList, "balloon_run_cycle") &&
 			hasTool(toolsList, "balloon_build_profile") &&
 			hasTool(toolsList, "balloon_audit_turn") &&
-			hasTool(toolsList, "balloon_generate_proxy_trickle")
+			hasTool(toolsList, "balloon_generate_proxy_trickle") &&
+			hasTool(toolsList, "balloon_repair_next_turn")
 		details.push(`toolSurfacePassed=${toolSurfacePassed ? "yes" : "no"}`)
 
 		const promptsList = await client.request("prompts/list", {})
@@ -266,6 +268,20 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			reviewPromptText.includes("Drift class") &&
 			reviewPromptText.includes("Smallest safe next step")
 		details.push(`promptMessagesLookUsable=${promptMessagesLookUsable ? "yes" : "no"}`)
+
+		const repairFallback = (await client.request("tools/call", {
+			name: "balloon_repair_next_turn",
+			arguments: {
+				sessionId: `${sessionId}-hero`,
+				userRequest: latestUserRequest,
+			},
+		})) as { structuredContent?: { repairedReply?: string; correctionSummary?: string; promptMessages?: Array<{ content?: { text?: string } }> } }
+		const repairFallbackWorked =
+			Boolean(repairFallback.structuredContent?.repairedReply?.includes("I would")) &&
+			Boolean(repairFallback.structuredContent?.correctionSummary?.includes("Balloon corrected")) &&
+			Array.isArray(repairFallback.structuredContent?.promptMessages) &&
+			(repairFallback.structuredContent?.promptMessages?.length ?? 0) >= 2
+		details.push(`repairFallbackWorked=${repairFallbackWorked ? "yes" : "no"}`)
 
 		const buildProfile = (await client.request("tools/call", {
 			name: "balloon_build_profile",
@@ -319,6 +335,7 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			toolSurfacePassed,
 			promptSurfacePassed: promptSurfacePassed && promptMessagesLookUsable,
 			heroCyclePassed,
+			repairFallbackWorked,
 			profileBuilt,
 			gapAuditWorked,
 			trickleGenerated,
@@ -339,6 +356,7 @@ export function formatBalloonMcpSmoke(result: SmokeResult): string {
 		`Tool surface: ${result.toolSurfacePassed ? "PASS" : "FAIL"}`,
 		`Prompt surface: ${result.promptSurfacePassed ? "PASS" : "FAIL"}`,
 		`Hero cycle: ${result.heroCyclePassed ? "PASS" : "FAIL"}`,
+		`Repair fallback: ${result.repairFallbackWorked ? "PASS" : "FAIL"}`,
 		`Profile build: ${result.profileBuilt ? "PASS" : "FAIL"}`,
 		`Gap audit: ${result.gapAuditWorked ? "PASS" : "FAIL"}`,
 		`Proxy trickle: ${result.trickleGenerated ? "PASS" : "FAIL"}`,
@@ -357,6 +375,7 @@ async function main(): Promise<void> {
 			result.toolSurfacePassed &&
 			result.promptSurfacePassed &&
 			result.heroCyclePassed &&
+			result.repairFallbackWorked &&
 			result.profileBuilt &&
 			result.gapAuditWorked &&
 			result.trickleGenerated &&

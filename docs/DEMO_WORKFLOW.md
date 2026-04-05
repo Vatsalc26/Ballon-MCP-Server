@@ -33,7 +33,7 @@ Then inspect:
 1. the gap report
 2. the proxy trickle
 3. the memory ledger update
-4. the prompt `balloon/repair-next-turn`
+4. the repair path: `balloon/repair-next-turn` or `balloon_repair_next_turn`
 
 ## Host-Tested Demo Prompts
 
@@ -60,6 +60,26 @@ Show me only:
 ```
 
 ### Prompt 2: Repair The Next Turn
+
+Preferred benchmark-safe path:
+
+```text
+Use #balloon_repair_next_turn with:
+
+- sessionId: queenshift-command-safe-2
+- userRequest: I want to improve interrupted-run incident messaging in Queenshift so owners can understand what happened without broad refactoring of command handling.
+
+Return text only.
+Do not edit files.
+Do not apply patches.
+Do not run terminal commands.
+
+Show me only:
+1. the repaired next assistant reply
+2. a short explanation of what Balloon corrected
+```
+
+If your MCP host routes prompts reliably, you can also use the prompt surface:
 
 ```text
 Use the MCP prompt "balloon/repair-next-turn" from server "balloon-mcp" with:
@@ -97,6 +117,8 @@ It is one where the system becomes more disciplined:
 4. it turns those findings into a smaller next-step correction rather than a broad replacement answer
 
 Another good sign is that the repaired reply sounds more disciplined than the drifted one. It should preserve the earlier direction without sounding like a full override.
+
+If the prompt path is flaky in your host, prefer the fallback tool for repeatable demos and benchmarks.
 
 ## Suggested Explanation
 

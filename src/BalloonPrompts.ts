@@ -1,5 +1,5 @@
 import { BalloonStateStore } from "./BalloonStateStore"
-import { buildSessionSummaryText } from "./BalloonTools"
+import { buildBalloonRepairBundle, type RepairPromptMessage } from "./BalloonRepair"
 
 type PromptArgument = {
 	name: string
@@ -15,13 +15,7 @@ export type PromptDefinition = {
 	arguments?: PromptArgument[]
 }
 
-export type PromptMessage = {
-	role: "user" | "assistant" | "system"
-	content: {
-		type: "text"
-		text: string
-	}
-}
+export type PromptMessage = RepairPromptMessage
 
 export type PromptResult = {
 	description: string
@@ -30,6 +24,24 @@ export type PromptResult = {
 
 function asString(value: unknown): string | null {
 	return typeof value === "string" && value.trim().length > 0 ? value.trim() : null
+}
+
+function formatList(values: string[], fallback: string): string {
+	if (values.length === 0) return fallback
+	return values.map((value, index) => `${index + 1}. ${value}`).join("\n")
+}
+
+function buildSessionSummaryText(store: BalloonStateStore, sessionId: string): string {
+	const summary = store.getSessionSummary(sessionId)
+	if (!summary) return `Session: ${sessionId}\nTurns: 0\nGaps: 0\nTrickles: 0\nMemory items: 0\nLast updated: unknown`
+	return [
+		`Session: ${summary.sessionId}`,
+		`Turns: ${summary.turnCount}`,
+		`Gaps: ${summary.gapCount}`,
+		`Trickles: ${summary.trickleCount}`,
+		`Memory items: ${summary.memoryCount}`,
+		`Last updated: ${summary.lastUpdatedAt ?? "unknown"}`,
+	].join("\n")
 }
 
 export function listBalloonPrompts(): PromptDefinition[] {
@@ -69,80 +81,26 @@ export function listBalloonPrompts(): PromptDefinition[] {
 	]
 }
 
-function formatList(values: string[], fallback: string): string {
-	if (values.length === 0) return fallback
-	return values.map((value, index) => `${index + 1}. ${value}`).join("\n")
-}
-
 function buildRepairPrompt(store: BalloonStateStore, sessionId: string, userRequest?: string): PromptResult {
-	const profile = store.getProfile(sessionId)
-	const gaps = store.getRecentGaps(sessionId, 5)
-	const trickle = store.getRecentTrickles(sessionId, 1)[0]
-	const memory = store.getMemoryLedger(sessionId).slice(0, 5)
-	const summary = buildSessionSummaryText(store, sessionId)
-
-	const systemSections = [
-		"You are preparing the next assistant turn in a Balloon-governed session.",
-		"Your job is to restore context fidelity without taking control away from the user.",
-		"Use the stored profile, recent gaps, proxy trickle, and memory items as low-volume corrective pressure.",
-		"Do not mention Balloon, CARA, auditing, or trickle unless the user explicitly asks.",
-		"Prefer the smallest safe reply that gets the session back on track.",
-		"",
-		"Session summary",
-		summary,
-		"",
-		"Known goals",
-		formatList(profile?.goals ?? [], "No explicit goals recorded."),
-		"",
-		"Known constraints",
-		formatList(profile?.constraints ?? [], "No explicit constraints recorded."),
-		"",
-		"Protected areas",
-		formatList(profile?.protectedAreas ?? [], "No protected areas recorded."),
-		"",
-		"Recent gaps to correct",
-		formatList(gaps.map((gap) => `${gap.title}: ${gap.description}`), "No recent gaps recorded."),
-		"",
-		"Proxy trickle instructions",
-		formatList(trickle?.priorityInstructions ?? [], "No proxy trickle instructions recorded."),
-		"",
-		"Reinforced memory items",
-		formatList(memory.map((item) => `${item.itemText} (${item.status})`), "No reinforced memory items recorded."),
-		"",
-		"Response requirements",
-		"1. Answer the current request directly.",
-		"2. Preserve established architecture, constraints, and protected areas.",
-		"3. Carry forward verification obligations when they matter to correctness.",
-		"4. Include material follow-on requirements if the current reply would otherwise miss them.",
-		"5. Avoid agreement-heavy filler and avoid broad rewrites unless the stored context explicitly requires them.",
-	]
-
-	const requestText =
-		userRequest ??
-		store
-			.getTurns(sessionId, 100)
-			.filter((turn) => turn.role === "user")
-			.slice(-1)[0]?.content ??
-		"Repair the next answer using the Balloon context above."
+	const bundle = buildBalloonRepairBundle(store, sessionId, { userRequest })
+	if (!bundle) {
+		return {
+			description: "Repair the next answer using current Balloon context, without overriding the user's intended direction.",
+			messages: [
+				{
+					role: "user",
+					content: {
+						type: "text",
+						text: "Repair the next answer using the stored Balloon context.",
+					},
+				},
+			],
+		}
+	}
 
 	return {
 		description: "Repair the next answer using current Balloon context, without overriding the user's intended direction.",
-		messages: [
-			{
-				role: "system",
-				content: {
-					type: "text",
-					text: systemSections.join("\n"),
-				},
-			},
-			{
-				role: "user",
-				content: {
-					type: "text",
-					text: `Write only the next assistant reply for this request while preserving the stored context:\n\n${requestText}\n\nIf the current direction is drifted or unsafe, correct course briefly and propose the next bounded step.`,
-				},
-			},
-		],
+		messages: bundle.messages,
 	}
 }
 

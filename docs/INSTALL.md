@@ -90,4 +90,7 @@ If the install path still depends on private verbal guidance, the public surface
 
 1. `balloon_run_cycle`
 2. `balloon/repair-next-turn`
-3. `balloon://sessions/{sessionId}/gaps`
+3. `balloon_repair_next_turn`
+4. `balloon://sessions/{sessionId}/gaps`
+
+If prompt invocation is inconsistent in your MCP host, prefer `balloon_repair_next_turn` for repeatable demos and benchmark runs.
