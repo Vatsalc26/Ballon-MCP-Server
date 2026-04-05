@@ -26,6 +26,24 @@ This is already useful because it makes one painful failure mode visible:
 2. but it quietly stops honoring earlier constraints
 3. Balloon surfaces the drift and helps the next turn recover
 
+## Product Shape
+
+The product is best understood as 3 layers:
+
+1. Balloon engine
+2. Balloon MCP server
+3. host integrations
+
+That matters because the desired user experience is not only "a server with tools."
+
+The goal is a snap-in anti-drift layer for coding sessions:
+
+1. connect Balloon quickly
+2. use it in an MCP-capable coding surface
+3. let it help keep earlier constraints, architecture direction, and verification obligations in view
+
+The current public repo is the alpha core of that experience, not the fully finished host experience yet.
+
 ## What This Alpha Does Not Claim
 
 The current public alpha does not claim:
@@ -64,6 +82,7 @@ The next useful steps are:
 3. cleaner repaired replies and better demo quality
 4. cleaner public examples and install paths
 5. bounded repo-aware grounding only where it materially improves CARA
+6. an optional hybrid semantic CARA lane layered on top of the deterministic base
 
 ## Medium-Term Roadmap
 
@@ -87,6 +106,21 @@ The next benchmark layer should proceed in this order:
 4. later comparison against public long-horizon benchmarks such as SlopCodeBench-style erosion and verbosity signals
 
 Do not claim benchmark wins before the runs exist and the results are reproducible.
+
+## Build Strategy
+
+The fastest credible path is a 2-lane build:
+
+1. deterministic Balloon as the stable reproducible base
+2. hybrid semantic Balloon as the next optional lane
+
+That lets the project compare:
+
+1. baseline
+2. deterministic Balloon
+3. hybrid Balloon
+
+without losing clarity on cost, latency, or what actually improved.
 
 ## Long-Term Roadmap
 
