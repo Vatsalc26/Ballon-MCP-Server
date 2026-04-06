@@ -165,12 +165,14 @@ Tools:
 21. `balloon_summarize_host_validation_results`
 22. `balloon_describe_slopcode_starter_suite`
 23. `balloon_plan_slopcode_starter_benchmark`
-24. `balloon_summarize_slopcode_starter_suite`
-25. `balloon_export_slopcode_starter_artifacts`
-26. `balloon_prepare_slopcode_problem`
-27. `balloon_review_session_drift`
-28. `balloon_update_memory_ledger`
-29. `balloon_explain_gap_report`
+24. `balloon_record_slopcode_run_evidence`
+25. `balloon_summarize_slopcode_run_evidence`
+26. `balloon_summarize_slopcode_starter_suite`
+27. `balloon_export_slopcode_starter_artifacts`
+28. `balloon_prepare_slopcode_problem`
+29. `balloon_review_session_drift`
+30. `balloon_update_memory_ledger`
+31. `balloon_explain_gap_report`
 
 Prompts:
 
@@ -193,7 +195,9 @@ Resources:
 12. `balloon://hosts/{host}/validation-evidence`
 13. `balloon://benchmark/slopcode/starter-suite`
 14. `balloon://benchmark/slopcode/starter-suite/runbook`
-15. `balloon://benchmark/slopcode/problems/{problemName}`
+15. `balloon://benchmark/slopcode/evidence`
+16. `balloon://benchmark/slopcode/evidence/{problemName}`
+17. `balloon://benchmark/slopcode/problems/{problemName}`
 
 ## Getting Started
 
@@ -230,6 +234,8 @@ If you want Balloon to generate or sanity-check a host config packet, use `ballo
 If you want the first real SlopCodeBench starter-suite workflow, use `balloon_describe_slopcode_starter_suite` and `balloon_prepare_slopcode_problem`.
 
 If you want repo-backed SCBench summary bundles, use `balloon_export_slopcode_starter_artifacts`.
+
+If you want to keep benchmark claims honest, record whether a run was truly live with `balloon_record_slopcode_run_evidence`, summarize it with `balloon_summarize_slopcode_run_evidence`, and inspect `balloon://benchmark/slopcode/evidence`.
 
 If the demo feels good, the important part is not that Balloon produced more text. The important part is that it preserved the existing direction and pushed the next reply back toward the user's real constraints.
 

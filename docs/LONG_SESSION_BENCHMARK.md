@@ -86,6 +86,10 @@ Use `balloon_export_slopcode_starter_artifacts` when you want JSON and Markdown 
 
 Those artifact exports now include pressure-trace summaries too, so you can see which starter problems kept rising, which ones settled, and where high-pressure checkpoints still remain.
 
+Use `balloon_record_slopcode_run_evidence` right after a rerun so the benchmark ledger says whether the run came from a real live LLM host session, a manual replay, a fixture, or a synthetic demo.
+
+Use `balloon_summarize_slopcode_run_evidence` or read `balloon://benchmark/slopcode/evidence` before making public benchmark claims.
+
 Suggested starting call:
 
 ```text
@@ -162,12 +166,18 @@ Use these starting fixtures:
 8. [../examples/benchmark_scorecard_request.example.json](../examples/benchmark_scorecard_request.example.json)
 9. [../examples/slopcode_starter_suite_summary_request.example.json](../examples/slopcode_starter_suite_summary_request.example.json)
 10. [../examples/slopcode_starter_artifact_export_request.example.json](../examples/slopcode_starter_artifact_export_request.example.json)
+11. [../examples/slopcode_run_evidence_request.example.json](../examples/slopcode_run_evidence_request.example.json)
+12. [../examples/slopcode_run_evidence_summary_request.example.json](../examples/slopcode_run_evidence_summary_request.example.json)
 
 They are not "official benchmark wins."
 
 They are simply reproducible longer-session starting points.
 
 The first real-problem step after those fixtures is the verified SCBench starter suite, not a claim of benchmark victory.
+
+Those fixtures are not live evidence by default.
+
+If a run was replayed from pasted turns or generated locally, record it that way and do not count it as live benchmark proof.
 
 ## What Good Looks Like
 

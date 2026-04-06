@@ -6,6 +6,7 @@ import type {
 	BalloonHostKind,
 	BalloonDriftPressureSnapshot,
 	BalloonHostValidationEvidence,
+	BalloonSlopCodeRunEvidence,
 	BalloonSessionSummary,
 	BalloonTurn,
 	MemoryLedgerItem,
@@ -120,6 +121,17 @@ CREATE TABLE IF NOT EXISTS balloon_host_validation_runs (
 
 CREATE INDEX IF NOT EXISTS idx_balloon_host_validation_host_recorded
 	ON balloon_host_validation_runs(host, recorded_at DESC);
+
+CREATE TABLE IF NOT EXISTS balloon_slopcode_run_evidence (
+	run_id TEXT PRIMARY KEY,
+	problem_name TEXT NOT NULL,
+	session_id TEXT NOT NULL,
+	evidence_json TEXT NOT NULL,
+	recorded_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_balloon_slopcode_problem_recorded
+	ON balloon_slopcode_run_evidence(problem_name, recorded_at DESC);
 `
 
 type SessionRow = {
@@ -160,6 +172,10 @@ type ReleaseRow = {
 }
 
 type HostValidationRow = {
+	evidence_json: string
+}
+
+type SlopCodeEvidenceRow = {
 	evidence_json: string
 }
 
@@ -533,6 +549,31 @@ export class BalloonStateStore {
 				}
 			})
 			.filter((row): row is BalloonHostValidationEvidence => row !== null)
+	}
+
+	saveSlopCodeRunEvidence(evidence: BalloonSlopCodeRunEvidence): void {
+		this.ensureSession(evidence.sessionId, evidence.recordedAt)
+		this.db
+			.prepare("INSERT INTO balloon_slopcode_run_evidence (run_id, problem_name, session_id, evidence_json, recorded_at) VALUES (?, ?, ?, ?, ?)")
+			.run(evidence.runId, evidence.problemName, evidence.sessionId, JSON.stringify(evidence), evidence.recordedAt)
+		this.touchSession(evidence.sessionId, evidence.recordedAt)
+	}
+
+	listSlopCodeRunEvidence(problemName?: string, limit = 100): BalloonSlopCodeRunEvidence[] {
+		const rows = problemName
+			? (this.db
+					.prepare("SELECT evidence_json FROM balloon_slopcode_run_evidence WHERE problem_name = ? ORDER BY recorded_at DESC LIMIT ?")
+					.all(problemName, limit) as SlopCodeEvidenceRow[])
+			: (this.db.prepare("SELECT evidence_json FROM balloon_slopcode_run_evidence ORDER BY recorded_at DESC LIMIT ?").all(limit) as SlopCodeEvidenceRow[])
+		return rows
+			.map((row) => {
+				try {
+					return JSON.parse(row.evidence_json) as BalloonSlopCodeRunEvidence
+				} catch {
+					return null
+				}
+			})
+			.filter((row): row is BalloonSlopCodeRunEvidence => row !== null)
 	}
 }
 

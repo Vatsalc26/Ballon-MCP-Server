@@ -1,0 +1,6 @@
+{
+  "tool": "balloon_summarize_slopcode_run_evidence",
+  "arguments": {
+    "problemNames": ["file_backup", "execution_server", "trajectory_api"]
+  }
+}

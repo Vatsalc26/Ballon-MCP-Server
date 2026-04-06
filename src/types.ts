@@ -408,6 +408,60 @@ export interface SlopCodeStarterSuiteSummary {
 	problems: SlopCodeStarterSuiteProblemSummary[]
 }
 
+export type BalloonSlopCodeEvidenceKind = "live_llm" | "manual_replay" | "fixture" | "synthetic_demo"
+
+export type BalloonSlopCodeTranscriptSource = "live_host_session" | "pasted_turns" | "fixture_turns" | "generated_demo"
+
+export interface BalloonSlopCodeRunEvidence {
+	runId: string
+	problemName: string
+	sessionId: string
+	evidenceKind: BalloonSlopCodeEvidenceKind
+	transcriptSource: BalloonSlopCodeTranscriptSource
+	host: BalloonHostKind | null
+	provider: string | null
+	model: string | null
+	datasetRoot: string | null
+	datasetVerificationStatus: SlopCodeDatasetVerificationStatus | null
+	checkpointMode: LongSessionCheckpointMode | null
+	checkpoints: number[]
+	notes: string[]
+	recordedAt: string
+}
+
+export type BalloonSlopCodeEvidenceCoverage = "live" | "non_live_only" | "not_run"
+
+export interface BalloonSlopCodeProblemEvidenceSummary {
+	problemName: string
+	totalRuns: number
+	liveRuns: number
+	manualReplayRuns: number
+	fixtureRuns: number
+	syntheticDemoRuns: number
+	coverage: BalloonSlopCodeEvidenceCoverage
+	latestEvidenceKind: BalloonSlopCodeEvidenceKind | null
+	latestHost: BalloonHostKind | null
+	latestProvider: string | null
+	latestModel: string | null
+	latestSessionId: string | null
+	latestRecordedAt: string | null
+	notes: string[]
+	recentRuns: BalloonSlopCodeRunEvidence[]
+}
+
+export interface BalloonSlopCodeEvidenceSummary {
+	suiteName: string
+	totalRuns: number
+	liveRuns: number
+	manualReplayRuns: number
+	fixtureRuns: number
+	syntheticDemoRuns: number
+	coveredProblems: number
+	liveCoveredProblems: number
+	problems: BalloonSlopCodeProblemEvidenceSummary[]
+	openRisks: string[]
+}
+
 export type BalloonHostKind = "vscode" | "cline" | "roo_code" | "claude_desktop" | "generic_json"
 
 export type BalloonHostReadinessTier = "recommended_first" | "promising" | "experimental" | "manual"

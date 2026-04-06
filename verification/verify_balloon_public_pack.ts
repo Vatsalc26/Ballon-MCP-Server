@@ -167,6 +167,8 @@ export async function runBalloonPublicPackHarness(rootDir = resolveRootDir()): P
 		"examples/host_validation_suite_request.example.json",
 		"examples/host_validation_result_request.example.json",
 		"examples/host_validation_summary_request.example.json",
+		"examples/slopcode_run_evidence_request.example.json",
+		"examples/slopcode_run_evidence_summary_request.example.json",
 	]
 	const missingFiles = requiredRelativeFiles.filter((relativePath) => !fs.existsSync(path.join(publicPackDir, relativePath)))
 	const requiredFilesPresent = missingFiles.length === 0
@@ -271,6 +273,10 @@ export async function runBalloonPublicPackHarness(rootDir = resolveRootDir()): P
 		{
 			relativePath: "examples/host_validation_summary_request.example.json",
 			requiredSnippets: ["\"host\": \"vscode\""],
+		},
+		{
+			relativePath: "examples/slopcode_run_evidence_request.example.json",
+			requiredSnippets: ["REPLACE_WITH_YOUR_SESSION_ID", "REPLACE_WITH_YOUR_SLOPCODEBENCH_ROOT"],
 		},
 		{
 			relativePath: "examples/vscode_mcp.example.json",

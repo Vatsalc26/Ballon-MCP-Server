@@ -2,7 +2,9 @@
 
 This is the first real dataset-backed Balloon benchmark starter set.
 
-It exists so we can move from toy scenarios into repeatable anti-slop evaluation without pretending we have already "won" SlopCodeBench.
+It is not a claim that Balloon has already won SlopCodeBench.
+
+It is the first verified set of real SCBench problems we recommend for repeatable Balloon anti-drift reruns.
 
 ## Selected Problems
 
@@ -14,66 +16,50 @@ It exists so we can move from toy scenarios into repeatable anti-slop evaluation
 
 ### `file_backup`
 
-Good for:
-
-1. bounded CLI evolution
-2. event-history and output-discipline carry-forward
-3. resisting unnecessary architectural widening when the spec gets more complex
+Good for bounded CLI evolution, event-history discipline, and checking whether Balloon resists premature refactors when the spec grows.
 
 ### `execution_server`
 
-Good for:
-
-1. additive server growth under timeout, caching, concurrency, and scheduling pressure
-2. checking whether Balloon preserves operational constraints instead of collapsing into broad rewrites
-3. exposing structural erosion once multiple follow-on requirements stack up
+Good for stateful server growth under timeout, caching, concurrency, and scheduling pressure.
 
 ### `trajectory_api`
 
-Good for:
+Good for preserving API boundaries, validation rules, concurrency discipline, and layered feature growth.
 
-1. preserving API boundaries and validation rules
-2. keeping concurrency and lineage constraints coherent later in the sequence
-3. checking whether Balloon stays bounded once parsing and sandboxing pressure arrive
+## New MCP Surfaces
 
-## New Runtime Surfaces
-
-Use these first:
+Use:
 
 1. `balloon_describe_slopcode_starter_suite`
 2. `balloon_plan_slopcode_starter_benchmark`
 3. `balloon_prepare_slopcode_problem`
 4. `balloon_score_benchmark_lanes`
 5. `balloon_score_long_session_benchmark`
-6. `balloon_summarize_slopcode_starter_suite`
-7. `balloon_export_slopcode_starter_artifacts`
-8. `balloon://benchmark/slopcode/starter-suite`
-9. `balloon://benchmark/slopcode/starter-suite/runbook`
-10. `balloon://benchmark/slopcode/problems/{problemName}`
+6. `balloon_record_slopcode_run_evidence`
+7. `balloon_summarize_slopcode_run_evidence`
+8. `balloon_summarize_slopcode_starter_suite`
+9. `balloon_export_slopcode_starter_artifacts`
+10. `balloon://benchmark/slopcode/starter-suite`
+11. `balloon://benchmark/slopcode/starter-suite/runbook`
+12. `balloon://benchmark/slopcode/evidence`
+13. `balloon://benchmark/slopcode/evidence/{problemName}`
+14. `balloon://benchmark/slopcode/problems/{problemName}`
 
-These do not claim benchmark victory.
+## Fast Starter Workflow
 
-They exist to make the starter suite:
-
-1. verified
-2. inspectable
-3. repeatable
-4. easier for contributors to rerun
-
-## Starter Workflow
-
-1. verify the local snapshot with `verify_slopcodebench_dataset`
-2. verify the selected starter-suite problems with `verify_slopcodebench_starter_suite`
+1. verify your local snapshot with `verify_slopcodebench_dataset`
+2. verify the selected starter problems with `verify_slopcodebench_starter_suite`
 3. inspect the suite with `balloon_describe_slopcode_starter_suite`
-4. generate the full runbook with `balloon_plan_slopcode_starter_benchmark`
+4. build the runbook with `balloon_plan_slopcode_starter_benchmark`
 5. inspect one problem with `balloon_prepare_slopcode_problem`
-6. run the checkpoint sequence in a real host session
+6. run the checkpoint sequence in your host
 7. compare lanes with `balloon_compare_benchmark_lanes`
 8. score them with `balloon_score_benchmark_lanes`
-9. when you score a whole SCBench checkpoint sequence, use `balloon_score_long_session_benchmark` with `checkpointMode: assistant_checkpoint`
-10. once several problem sessions exist, roll them up with `balloon_summarize_slopcode_starter_suite`
-11. save JSON and Markdown benchmark artifacts with `balloon_export_slopcode_starter_artifacts`
-12. use the exported pressure traces to note where Balloon actually reduced drift and where pressure stayed elevated
+9. if you stretch the same session across multiple checkpoints, score the whole checkpoint batch with `balloon_score_long_session_benchmark`
+10. for SCBench starter sequences, treat those checkpoint numbers as assistant-turn ordinals and set `checkpointMode: assistant_checkpoint`
+11. record whether the run was live, replayed, fixture-based, or synthetic with `balloon_record_slopcode_run_evidence`
+12. after several problem sessions exist, roll them up with `balloon_summarize_slopcode_run_evidence` and `balloon_summarize_slopcode_starter_suite`
+13. export the suite bundle with `balloon_export_slopcode_starter_artifacts`
 
 ## Recommended First Order
 
@@ -81,38 +67,46 @@ They exist to make the starter suite:
 2. `execution_server`
 3. `trajectory_api`
 
-That order starts with bounded CLI pressure, then moves to more stateful server pressure, then finishes with richer API-boundary pressure.
+## Suggested Rule
 
-## Recommended Benchmark Rule
-
-For these first checkpoint-sequence runs:
+For the first checkpoint-sequence runs:
 
 1. keep `forceStageCount: 3`
-2. treat the recommended SCBench checkpoint numbers as assistant-turn ordinals, not raw turn counts
+2. treat the recommended checkpoint numbers as assistant-turn ordinals, not raw turn counts
 3. set `checkpointMode: assistant_checkpoint` whenever you score a whole checkpoint batch
-4. score at least the opening, middle, and late checkpoint of each problem
-5. use the same six-dimension scorecard on every rerun:
+4. score the opening, middle, and late checkpoint of each problem
+5. keep the same score dimensions every time:
 6. constraint preservation
 7. architecture preservation
 8. verification carry-forward
 9. omission recovery
 10. boundedness
 11. clarity
-12. export the scored bundle so the rerun leaves repo-backed artifacts instead of only chat text
-13. do not make claims beyond "starter-suite reruns"
-14. if we want stronger external-benchmark claims later, pin the upstream dataset revision instead of relying on the current zip-style snapshot
+12. export JSON and Markdown artifacts for each rerun
+13. explicitly mark replayed or synthetic runs as non-live evidence
+14. keep claims modest and reproducible
 
-## Why This Block Matters
+## Why The New Runbook Matters
 
-The starter suite now has an explicit runbook, a scorecard tool, and an artifact export path.
+The starter suite now has both:
 
-That means contributors no longer have to improvise:
+1. a runbook tool
+2. a scorecard tool
+3. a long-session score tool
+4. an evidence ledger that separates live runs from replay/demo runs
+5. a suite summary tool
+6. an artifact export tool
 
-1. which order to run
-2. which prompts to paste next
-3. how to score `baseline / deterministic / assist / staged`
-4. how to summarize a whole long-session checkpoint batch
-5. how to summarize the whole starter suite once multiple real sessions exist
-6. how to save JSON and Markdown artifacts for the rerun
-7. how to keep claims honest while still gathering useful anti-slop evidence
-8. how to point to concrete rising/falling pressure traces instead of hand-waving about session quality
+So contributors can move from dataset verification to repeatable scoring without inventing their own process each time.
+
+## Claim Boundary
+
+Say:
+
+1. Balloon has a verified SCBench starter-suite path
+2. Balloon is being tested on real benchmark problem sequences
+
+Do not say:
+
+1. Balloon has already beaten SlopCodeBench
+2. Balloon has solved long-horizon coding in general
