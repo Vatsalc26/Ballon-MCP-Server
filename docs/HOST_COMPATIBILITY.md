@@ -4,6 +4,20 @@ This page answers a simple question:
 
 Where should you try Balloon MCP first, and where is it still more experimental?
 
+## Built-In Host Help
+
+If you want Balloon itself to generate or check the config:
+
+1. use `balloon_prepare_host_setup_packet` for a host-specific config snippet
+2. use `balloon_validate_host_setup` against a config file or inline JSON
+3. use `balloon_run_install_diagnostics` for a stricter install-doctor pass
+4. use `balloon_prepare_host_flow_packet` for the safest flow-specific invocation path
+5. read `balloon://hosts/matrix` for the current host tiers
+6. read `balloon://hosts/{host}` for host-specific caveats and restart guidance
+7. read `balloon://hosts/{host}/playbook` for the built-in host flow playbook
+8. use `balloon_prepare_host_validation_suite` or read `balloon://hosts/{host}/validation-suite` for the same-chat and fresh-chat validation order
+9. use `balloon_record_host_validation_result`, `balloon_summarize_host_validation_results`, or `balloon://hosts/{host}/validation-evidence` to keep a real evidence trail
+
 ## Current Host Readiness
 
 ### Tier 1: Recommended First
@@ -91,6 +105,11 @@ Use these first in any host:
 2. `balloon_repair_next_turn`
 3. `balloon_review_session_drift`
 4. `balloon_compare_benchmark_lanes`
+5. `balloon_prepare_host_setup_packet`
+6. `balloon_validate_host_setup`
+7. `balloon_run_install_diagnostics`
+8. `balloon_prepare_host_flow_packet`
+9. `balloon_prepare_host_validation_suite`
 
 These are better first tests because they avoid depending on prompt routing.
 
@@ -122,6 +141,10 @@ If tools seem stale:
 If you want the shortest path to a good first experience:
 
 1. start in VS Code
-2. validate `balloon_run_cycle`
-3. validate `balloon_compare_benchmark_lanes`
-4. then try Cline or Roo with the example configs
+2. generate the config with `balloon_prepare_host_setup_packet`
+3. run `balloon_run_install_diagnostics`
+4. read `balloon://hosts/vscode/playbook` or run `balloon_prepare_host_flow_packet`
+5. read `balloon://hosts/vscode/validation-suite` or run `balloon_prepare_host_validation_suite`
+6. validate `balloon_run_cycle`
+7. validate `balloon_compare_benchmark_lanes`
+8. then try Cline or Roo with the example configs

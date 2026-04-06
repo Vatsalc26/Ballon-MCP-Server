@@ -1,5 +1,5 @@
 import crypto from "crypto"
-import type { MemoryLedgerItem, ProxyTrickle, ReleasePacket, ReleasedCorrection } from "./types"
+import type { BalloonPersistentDriftBias, BalloonPersistentDriftFocus, MemoryLedgerItem, ProxyTrickle, ReleasePacket, ReleasedCorrection } from "./types"
 
 function nowIso(): string {
 	return new Date().toISOString()
@@ -120,8 +120,58 @@ function trickleThreshold(sourceText: string): number {
 	return 0.24
 }
 
+function focusBiasMatches(text: string, focus: BalloonPersistentDriftFocus): boolean {
+	switch (focus) {
+		case "architecture":
+			return /\barchitecture\b|\bcurrent structure\b|\bexisting structure\b|\bpattern\b|\brouter\b|\bservice\b/i.test(text)
+		case "verification":
+			return /\btests?\b|\bverif(?:y|ication)\b|\bvalidation\b|\bsmoke\b|\bmigration\b|\brollback\b|\breplayability\b|\bincident clarity\b/i.test(text)
+		case "protected_area":
+			return /\bprotected\b|\bexcluded\b|\bdo not modify\b|\bdo not edit\b|\buntouched\b|(?:src|app|lib|tests?|docs|scripts)\/[A-Za-z0-9_./-]+/i.test(text)
+		case "interface":
+			return /\binterface\b|\bcontract\b|\bschema\b|\bapi\b|\bsignature\b|\bendpoint\b/i.test(text)
+		case "style":
+			return /\btype(?:-| )safe\b|\btypescript\b|\bstrict typing\b|\bstyle\b|\blint\b|\bformat\b/i.test(text)
+		case "hidden_requirement":
+			return /\bfollow-on\b|\bimplied\b|\bqueue semantics\b|\btimeout\b|\bconfig\b/i.test(text)
+		case "request_reanchor":
+		default:
+			return /\brequest\b|\bsession context\b|\bre-anchor\b|\breconnect\b|\bcurrent ask\b/i.test(text)
+	}
+}
+
+function focusBiasLabel(focus: BalloonPersistentDriftFocus): string {
+	switch (focus) {
+		case "architecture":
+			return "persistent_architecture"
+		case "verification":
+			return "persistent_verification"
+		case "protected_area":
+			return "persistent_protected_area"
+		case "interface":
+			return "persistent_interface"
+		case "style":
+			return "persistent_style"
+		case "hidden_requirement":
+			return "persistent_hidden_requirement"
+		case "request_reanchor":
+		default:
+			return "persistent_request_reanchor"
+	}
+}
+
+function resolveBiasAdjustment(text: string, bias?: BalloonPersistentDriftBias): { delta: number; reasons: string[] } {
+	if (!bias) return { delta: 0, reasons: [] }
+	const reasons = bias.focusOrder.filter((focus) => focusBiasMatches(text, focus)).map((focus) => focusBiasLabel(focus))
+	if (reasons.length === 0) return { delta: 0, reasons: [] }
+	const repeatedInstructionBonus = /^Repeated /i.test(text) || /^Reconnect the next turn/i.test(text) ? 0.03 : 0
+	const delta = Math.min(0.16, reasons.length * 0.04 + (bias.sustainedPressure ? 0.05 : 0) + repeatedInstructionBonus)
+	return { delta: Number(delta.toFixed(3)), reasons }
+}
+
 function buildReleaseSummary(packet: ReleasePacket): string {
-	return `Similarity-gated release evaluated ${packet.released.length + packet.held.length} candidate correction(s): released ${packet.released.length}, held ${packet.held.length}.`
+	const focusText = packet.persistentFocus.length > 0 ? ` Persistent focus: ${packet.persistentFocus.join(", ")}.` : ""
+	return `Similarity-gated release evaluated ${packet.released.length + packet.held.length} candidate correction(s): released ${packet.released.length}, held ${packet.held.length}.${focusText}`
 }
 
 function buildReleaseDeliveryText(packet: ReleasePacket): string {
@@ -130,7 +180,12 @@ function buildReleaseDeliveryText(packet: ReleasePacket): string {
 	}
 	const lines = [
 		"Similarity-gated release:",
-		...packet.released.slice(0, 6).map((item, index) => `${index + 1}. ${item.sourceText} (score=${item.similarityScore.toFixed(2)}, matched=${item.matchedTerms.join(", ") || "none"})`),
+		...packet.released
+			.slice(0, 6)
+			.map(
+				(item, index) =>
+					`${index + 1}. ${item.sourceText} (score=${item.similarityScore.toFixed(2)}, threshold=${item.threshold.toFixed(2)}, matched=${item.matchedTerms.join(", ") || "none"}${item.biasReasons.length > 0 ? `, bias=${item.biasReasons.join(",")}` : ""})`,
+			),
 	]
 	return lines.join("\n")
 }
@@ -139,6 +194,7 @@ type ReleasePacketOptions = {
 	queryText: string
 	recentTrickles: ProxyTrickle[]
 	memoryItems: MemoryLedgerItem[]
+	bias?: BalloonPersistentDriftBias
 }
 
 export function buildReleasePacket(sessionId: string, options: ReleasePacketOptions): ReleasePacket {
@@ -148,7 +204,8 @@ export function buildReleasePacket(sessionId: string, options: ReleasePacketOpti
 
 	for (const item of options.memoryItems) {
 		const similarity = computeSimilarity(options.queryText, item.itemText)
-		const threshold = memoryThreshold(item.status)
+		const bias = resolveBiasAdjustment(item.itemText, options.bias)
+		const threshold = Math.max(0.1, Number((memoryThreshold(item.status) - bias.delta).toFixed(3)))
 		const entry: ReleasedCorrection = {
 			releaseId: makeId("release"),
 			sessionId,
@@ -158,6 +215,7 @@ export function buildReleasePacket(sessionId: string, options: ReleasePacketOpti
 			similarityScore: similarity.score,
 			threshold,
 			matchedTerms: similarity.matchedTerms,
+			biasReasons: bias.reasons,
 			released: similarity.score >= threshold,
 			status: item.status,
 			createdAt,
@@ -169,7 +227,8 @@ export function buildReleasePacket(sessionId: string, options: ReleasePacketOpti
 	for (const trickle of options.recentTrickles) {
 		trickle.priorityInstructions.forEach((instruction, index) => {
 			const similarity = computeSimilarity(options.queryText, instruction)
-			const threshold = trickleThreshold(instruction)
+			const bias = resolveBiasAdjustment(instruction, options.bias)
+			const threshold = Math.max(0.1, Number((trickleThreshold(instruction) - bias.delta).toFixed(3)))
 			const entry: ReleasedCorrection = {
 				releaseId: makeId("release"),
 				sessionId,
@@ -179,6 +238,7 @@ export function buildReleasePacket(sessionId: string, options: ReleasePacketOpti
 				similarityScore: similarity.score,
 				threshold,
 				matchedTerms: similarity.matchedTerms,
+				biasReasons: bias.reasons,
 				released: similarity.score >= threshold,
 				createdAt,
 			}
@@ -187,13 +247,25 @@ export function buildReleasePacket(sessionId: string, options: ReleasePacketOpti
 		})
 	}
 
-	released.sort((left, right) => right.similarityScore - left.similarityScore)
-	held.sort((left, right) => right.similarityScore - left.similarityScore)
+	if (released.length === 0 && options.bias?.sustainedPressure) {
+		const fallback = held.find((entry) => entry.sourceKind === "trickle" && entry.biasReasons.length > 0 && entry.similarityScore >= 0.05)
+		if (fallback) {
+			fallback.released = true
+			fallback.threshold = Number(Math.max(0.04, fallback.similarityScore - 0.001).toFixed(3))
+			fallback.biasReasons = uniq([...fallback.biasReasons, "sustained_pressure_release"], 4)
+			held.splice(held.indexOf(fallback), 1)
+			released.push(fallback)
+		}
+	}
+
+	released.sort((left, right) => right.biasReasons.length - left.biasReasons.length || right.similarityScore - left.similarityScore)
+	held.sort((left, right) => right.biasReasons.length - left.biasReasons.length || right.similarityScore - left.similarityScore)
 
 	const packet: ReleasePacket = {
 		packetId: makeId("packet"),
 		sessionId,
 		queryText: options.queryText,
+		persistentFocus: options.bias?.focusOrder ?? [],
 		released,
 		held,
 		summary: "",

@@ -13,7 +13,7 @@
 
 Balloon MCP is an MCP server for monitoring context fidelity in long AI sessions.
 
-The server is designed around one central observation: long sessions do not only lose facts, they often lose the shape of the user's intent. Balloon turns that problem into a visible runtime surface with profiles, gap reports, retrieval anchors, corrective prompts, and replayable artifacts.
+The server is designed around one central observation: long sessions do not only lose facts, they often lose the shape of the user's intent. Balloon turns that problem into a visible runtime surface with profiles, gap reports, drift-pressure summaries, retrieval anchors, corrective prompts, and replayable artifacts.
 
 <p align="center">
   <img src="./docs/assets/balloon-mcp-banner.png" alt="Balloon MCP anti-drift banner" width="760" />
@@ -59,12 +59,14 @@ Balloon MCP helps a host application:
 
 1. build a structured session profile
 2. audit the latest turn for drift and omissions
-3. surface hidden requirements and questions behind the question
-4. retrieve only the most relevant anchors
-5. generate a low-volume, non-overriding proxy trickle
-6. reinforce recurring context in a memory ledger
-7. release similarity-matched corrections from memory and trickle into the next step
-8. run a staged external prototype with early, mid, and deep Balloon passes
+3. score the current drift pressure instead of only listing raw gaps
+4. surface hidden requirements and questions behind the question
+5. retrieve only the most relevant anchors
+6. generate a low-volume, non-overriding proxy trickle
+7. reinforce recurring context in a memory ledger
+8. promote repeated drift into persistent focus that can change retrieval, trickle ordering, and release behavior
+9. release similarity-matched corrections from memory and trickle into the next step
+10. run a staged external prototype with early, mid, and deep Balloon passes
 
 By design, the server returns analysis artifacts and corrective context. It does not patch your repo by itself.
 
@@ -111,6 +113,7 @@ It should make one specific failure visible:
 1. the latest answer looks locally plausible
 2. but it has stopped honoring earlier constraints, protected areas, or verification obligations
 3. Balloon surfaces that loss of intent and applies smaller corrective pressure instead of stuffing the whole session back into the next turn
+4. recurring drift can now become persistent focus, so repeated architecture or verification failures get pulled earlier into the correction path
 
 That makes the first useful experience easier to relate to:
 
@@ -129,9 +132,11 @@ It runs the main Balloon loop:
 1. profile update
 2. hidden-requirement detection
 3. CARA-style gap audit
-4. targeted retrieval
-5. proxy trickle generation
-6. optional memory reinforcement
+4. drift-pressure scoring
+5. persistent drift focus when the same failure pattern keeps recurring
+6. targeted retrieval
+7. proxy trickle generation
+8. optional memory reinforcement
 
 ## Protocol Surface
 
@@ -148,12 +153,24 @@ Tools:
 9. `balloon_compare_repair_lanes`
 10. `balloon_run_staged_cycle`
 11. `balloon_compare_benchmark_lanes`
-12. `balloon_run_long_session_benchmark`
-13. `balloon_describe_slopcode_starter_suite`
-14. `balloon_prepare_slopcode_problem`
-15. `balloon_review_session_drift`
-16. `balloon_update_memory_ledger`
-17. `balloon_explain_gap_report`
+12. `balloon_score_benchmark_lanes`
+13. `balloon_run_long_session_benchmark`
+14. `balloon_score_long_session_benchmark`
+15. `balloon_prepare_host_setup_packet`
+16. `balloon_validate_host_setup`
+17. `balloon_run_install_diagnostics`
+18. `balloon_prepare_host_flow_packet`
+19. `balloon_prepare_host_validation_suite`
+20. `balloon_record_host_validation_result`
+21. `balloon_summarize_host_validation_results`
+22. `balloon_describe_slopcode_starter_suite`
+23. `balloon_plan_slopcode_starter_benchmark`
+24. `balloon_summarize_slopcode_starter_suite`
+25. `balloon_export_slopcode_starter_artifacts`
+26. `balloon_prepare_slopcode_problem`
+27. `balloon_review_session_drift`
+28. `balloon_update_memory_ledger`
+29. `balloon_explain_gap_report`
 
 Prompts:
 
@@ -165,11 +182,18 @@ Resources:
 1. `balloon://sessions/{sessionId}/summary`
 2. `balloon://sessions/{sessionId}/profile`
 3. `balloon://sessions/{sessionId}/gaps`
-4. `balloon://sessions/{sessionId}/trickles`
-5. `balloon://sessions/{sessionId}/memory`
-6. `balloon://sessions/{sessionId}/releases`
-7. `balloon://benchmark/slopcode/starter-suite`
-8. `balloon://benchmark/slopcode/problems/{problemName}`
+4. `balloon://sessions/{sessionId}/pressure`
+5. `balloon://sessions/{sessionId}/trickles`
+6. `balloon://sessions/{sessionId}/memory`
+7. `balloon://sessions/{sessionId}/releases`
+8. `balloon://hosts/matrix`
+9. `balloon://hosts/{host}`
+10. `balloon://hosts/{host}/playbook`
+11. `balloon://hosts/{host}/validation-suite`
+12. `balloon://hosts/{host}/validation-evidence`
+13. `balloon://benchmark/slopcode/starter-suite`
+14. `balloon://benchmark/slopcode/starter-suite/runbook`
+15. `balloon://benchmark/slopcode/problems/{problemName}`
 
 ## Getting Started
 
@@ -185,7 +209,7 @@ The recommended first demo is intentionally small:
 
 1. earlier context says not to rewrite architecture and not to skip tests
 2. a later assistant turn confidently proposes a rewrite anyway
-3. Balloon produces a gap report, a proxy trickle, and a sharper next-turn repair path
+3. Balloon produces a gap report, a drift-pressure summary, a proxy trickle, and a sharper next-turn repair path
 
 If your MCP host is unreliable about prompt invocation, use `balloon_repair_next_turn` as the tool-level fallback. It returns the repair packet and a deterministic repaired reply, which makes demos and benchmarks more repeatable.
 
@@ -199,7 +223,13 @@ If you want the benchmark-safe four-lane comparison, use `balloon_compare_benchm
 
 If you want checkpointed long-session comparison in one tool call, use `balloon_run_long_session_benchmark`.
 
+If you want to inspect whether drift pressure is rising, falling, or staying stuck across a session, read `balloon://sessions/{sessionId}/pressure`.
+
+If you want Balloon to generate or sanity-check a host config packet, use `balloon_prepare_host_setup_packet`, `balloon_validate_host_setup`, `balloon_run_install_diagnostics`, `balloon_prepare_host_flow_packet`, `balloon_prepare_host_validation_suite`, `balloon_record_host_validation_result`, `balloon_summarize_host_validation_results`, or `balloon://hosts/matrix`.
+
 If you want the first real SlopCodeBench starter-suite workflow, use `balloon_describe_slopcode_starter_suite` and `balloon_prepare_slopcode_problem`.
+
+If you want repo-backed SCBench summary bundles, use `balloon_export_slopcode_starter_artifacts`.
 
 If the demo feels good, the important part is not that Balloon produced more text. The important part is that it preserved the existing direction and pushed the next reply back toward the user's real constraints.
 
@@ -211,18 +241,19 @@ If the demo feels good, the important part is not that Balloon produced more tex
 4. [Semantic CARA](./docs/SEMANTIC_CARA.md)
 5. [Staged external Balloon](./docs/STAGED_EXTERNAL_BALLOON.md)
 6. [Host compatibility](./docs/HOST_COMPATIBILITY.md)
-7. [Cline quickstart](./docs/CLINE_QUICKSTART.md)
-8. [Roo Code quickstart](./docs/ROO_CODE_QUICKSTART.md)
-9. [Latency and correction tax](./docs/LATENCY_AND_CORRECTION_TAX.md)
-10. [Benchmark lanes](./docs/BENCHMARK_LANES.md)
-11. [Long-session benchmark](./docs/LONG_SESSION_BENCHMARK.md)
-12. [SlopCodeBench starter suite](./docs/SLOPCODEBENCH_STARTER_SUITE.md)
-13. [Contributor starters](./docs/CONTRIBUTOR_STARTERS.md)
-14. [MCP listings](./docs/MCP_LISTINGS.md)
-15. [Architecture roadmap](./docs/ROADMAP.md)
-16. [Contributing](./CONTRIBUTING.md)
-17. [Security policy](./SECURITY.md)
-18. [Support](./SUPPORT.md)
+7. [Host validation](./docs/HOST_VALIDATION.md)
+8. [Cline quickstart](./docs/CLINE_QUICKSTART.md)
+9. [Roo Code quickstart](./docs/ROO_CODE_QUICKSTART.md)
+10. [Latency and correction tax](./docs/LATENCY_AND_CORRECTION_TAX.md)
+11. [Benchmark lanes](./docs/BENCHMARK_LANES.md)
+12. [Long-session benchmark](./docs/LONG_SESSION_BENCHMARK.md)
+13. [SlopCodeBench starter suite](./docs/SLOPCODEBENCH_STARTER_SUITE.md)
+14. [Contributor starters](./docs/CONTRIBUTOR_STARTERS.md)
+15. [MCP listings](./docs/MCP_LISTINGS.md)
+16. [Architecture roadmap](./docs/ROADMAP.md)
+17. [Contributing](./CONTRIBUTING.md)
+18. [Security policy](./SECURITY.md)
+19. [Support](./SUPPORT.md)
 
 ## Visual Assets
 

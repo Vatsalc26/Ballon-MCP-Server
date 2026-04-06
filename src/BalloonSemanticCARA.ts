@@ -113,8 +113,14 @@ function buildShadowNotes(packet: SemanticCaraPacket, maxNotes: number): string[
 	if (packet.gaps.some((gap) => gap.type === "architecture_drift" || gap.type === "profile_contradiction")) {
 		notes.push("Preserve the stored architecture direction and protected areas before proposing any larger change.")
 	}
+	if (packet.profile.protectedInterfaces.length > 0) {
+		notes.push(`Keep the protected interface or contract stable: ${packet.profile.protectedInterfaces.slice(0, 2).join(" | ")}.`)
+	}
 	if (packet.gaps.some((gap) => gap.type === "constraint_omission")) {
 		notes.push("Carry forward the stored verification obligations explicitly in the next reply.")
+	}
+	if (packet.profile.styleRequirements.length > 0) {
+		notes.push(`Keep style and typing requirements visible: ${packet.profile.styleRequirements.slice(0, 2).join(" | ")}.`)
 	}
 	if (packet.hiddenRequirements.length > 0) {
 		notes.push(`Surface the missing follow-on work explicitly: ${packet.hiddenRequirements.map((item) => item.requirement).slice(0, 3).join(", ")}.`)
@@ -182,7 +188,9 @@ function resolveAdapterPath(adapterPath: string): { resolvedPath: string | null;
 	const attemptedPaths = uniq(
 		[
 			path.resolve(process.cwd(), adapterPath),
-			path.resolve(process.cwd(), "examples", path.basename(adapterPath)),
+			path.resolve(process.cwd(), "public_pack", adapterPath),
+			path.resolve(process.cwd(), "Ballon_architecture", "balloon_mcp_server", adapterPath),
+			path.resolve(process.cwd(), "Ballon_architecture", "balloon_mcp_server", "public_pack", adapterPath),
 		],
 		8,
 	)

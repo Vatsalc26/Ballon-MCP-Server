@@ -1,0 +1,7 @@
+{
+  "tool": "balloon_prepare_host_setup_packet",
+  "arguments": {
+    "host": "cline",
+    "repoPath": "REPLACE_WITH_YOUR_BALLOON_MCP_REPO_PATH"
+  }
+}

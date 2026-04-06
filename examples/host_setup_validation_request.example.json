@@ -1,0 +1,8 @@
+{
+  "tool": "balloon_validate_host_setup",
+  "arguments": {
+    "host": "cline",
+    "configPath": "REPLACE_WITH_YOUR_HOST_CONFIG_PATH",
+    "repoPath": "REPLACE_WITH_YOUR_BALLOON_MCP_REPO_PATH"
+  }
+}

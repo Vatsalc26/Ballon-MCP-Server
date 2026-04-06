@@ -1,0 +1,10 @@
+{
+  "tool": "balloon_export_slopcode_starter_artifacts",
+  "arguments": {
+    "problemNames": [
+      "file_backup"
+    ],
+    "semanticAdapterPath": ".\\examples\\semantic_cara_adapter.example.mjs",
+    "outputDir": ".\\benchmark_artifacts\\slopcode_starter_suite\\sample_export"
+  }
+}

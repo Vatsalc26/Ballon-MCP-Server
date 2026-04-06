@@ -31,13 +31,14 @@ Run the hero tool:
 Then inspect:
 
 1. the gap report
-2. the proxy trickle
-3. the memory ledger update
-4. the repair path: `balloon/repair-next-turn` or `balloon_repair_next_turn`
-5. the optional hybrid lane: `balloon_semantic_cara_preview`
-6. the side-by-side lane comparison: `balloon_compare_repair_lanes`
-7. the staged external prototype: `balloon_run_staged_cycle`
-8. the benchmark-safe four-lane comparison: `balloon_compare_benchmark_lanes`
+2. the drift-pressure summary
+3. the proxy trickle
+4. the memory ledger update
+5. the repair path: `balloon/repair-next-turn` or `balloon_repair_next_turn`
+6. the optional hybrid lane: `balloon_semantic_cara_preview`
+7. the side-by-side lane comparison: `balloon_compare_repair_lanes`
+8. the staged external prototype: `balloon_run_staged_cycle`
+9. the benchmark-safe four-lane comparison: `balloon_compare_benchmark_lanes`
 
 ## Host-Tested Demo Prompts
 
@@ -59,8 +60,9 @@ Do not run terminal commands.
 
 Show me only:
 1. the gap report
-2. the proxy trickle
-3. the suggested next-turn stance
+2. the drift-pressure summary
+3. the proxy trickle
+4. the suggested next-turn stance
 ```
 
 ### Prompt 2: Repair The Next Turn
@@ -100,6 +102,17 @@ Show me only:
 1. the repaired next assistant reply
 2. a short explanation of what Balloon corrected
 ```
+
+If you want Balloon to tell you the safest host-specific path before you run the demo, use `balloon_prepare_host_flow_packet` with:
+
+1. `host: vscode` or your real host
+2. `flow: repair_next_turn`
+3. the same `sessionId`
+4. the same `userRequest`
+
+That packet keeps the tool-first path explicit and only treats the prompt surface as an alternate path.
+
+If you want the full same-chat vs fresh-chat validation order for that host, use `balloon_prepare_host_validation_suite` or read `balloon://hosts/{host}/validation-suite`.
 
 ### Prompt 3: Preview The Hybrid Lane
 
@@ -158,9 +171,10 @@ Do not run terminal commands.
 
 Show me only:
 1. the active stages
-2. the release packet summary
-3. the deterministic repaired reply
-4. the staged external reply
+2. the drift-pressure summary
+3. the release packet summary
+4. the deterministic repaired reply
+5. the staged external reply
 ```
 
 ### Prompt 6: Compare All Benchmark Lanes

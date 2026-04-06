@@ -43,6 +43,8 @@ If you want the first recommended real-problem set after verification, use:
 4. `balloon_prepare_slopcode_problem`
 5. `balloon_score_benchmark_lanes`
 
+For SCBench starter-suite reruns, the recommended checkpoint numbers are assistant-turn ordinals. Use `checkpointMode: assistant_checkpoint` when you score the whole sequence with `balloon_score_long_session_benchmark`.
+
 ## What To Measure
 
 Across a longer session, check whether Balloon keeps:
@@ -80,6 +82,8 @@ Use `balloon_run_long_session_benchmark` when you want checkpointed long-session
 
 Use `balloon_score_long_session_benchmark` when you want the same checkpoints scored automatically on Balloon's six-dimension scorecard.
 
+Use `balloon_export_slopcode_starter_artifacts` when you want JSON and Markdown summaries written to disk for repo-backed benchmark tracking.
+
 Suggested starting call:
 
 ```text
@@ -102,6 +106,8 @@ That call will return checkpoint batches with:
 2. deterministic Balloon reply
 3. assist Balloon reply
 4. staged external Balloon reply
+5. checkpoint drift-pressure snapshots so you can see whether pressure is rising or being corrected
+6. pressure-conditioned behavior where repeated architecture or verification drift can become persistent focus instead of being treated like isolated misses
 
 If you want the standard six-dimension scorecard immediately after that, run `balloon_score_benchmark_lanes` on the same session.
 
@@ -126,6 +132,12 @@ That call will return:
 1. checkpoint-by-checkpoint scorecards
 2. aggregate lane totals
 3. top-performing lane(s) across the whole long-session batch
+4. a pressure-history summary across the checkpoint sequence
+5. checkpoint drift-pressure traces that make it easier to say where Balloon re-anchored the session and where pressure stayed stuck
+
+If you want the same signal after normal tool use, inspect:
+
+1. `balloon://sessions/{sessionId}/pressure`
 
 ## Recommended Staged Profiles
 
@@ -147,6 +159,7 @@ Use these starting fixtures:
 7. [../examples/slopcode_problem_prep_request.example.json](../examples/slopcode_problem_prep_request.example.json)
 8. [../examples/benchmark_scorecard_request.example.json](../examples/benchmark_scorecard_request.example.json)
 9. [../examples/slopcode_starter_suite_summary_request.example.json](../examples/slopcode_starter_suite_summary_request.example.json)
+10. [../examples/slopcode_starter_artifact_export_request.example.json](../examples/slopcode_starter_artifact_export_request.example.json)
 
 They are not "official benchmark wins."
 

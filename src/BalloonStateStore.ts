@@ -1,7 +1,18 @@
 import fs from "fs"
 import path from "path"
 import crypto from "crypto"
-import type { BalloonGap, BalloonSessionSummary, BalloonTurn, MemoryLedgerItem, ProxyTrickle, ReleasePacket, StructuredProfile } from "./types"
+import type {
+	BalloonGap,
+	BalloonHostKind,
+	BalloonDriftPressureSnapshot,
+	BalloonHostValidationEvidence,
+	BalloonSessionSummary,
+	BalloonTurn,
+	MemoryLedgerItem,
+	ProxyTrickle,
+	ReleasePacket,
+	StructuredProfile,
+} from "./types"
 
 type DbRunResult = {
 	changes: number
@@ -87,6 +98,28 @@ CREATE TABLE IF NOT EXISTS balloon_releases (
 
 CREATE INDEX IF NOT EXISTS idx_balloon_releases_session_created
 	ON balloon_releases(session_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS balloon_pressure_snapshots (
+	snapshot_id TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL,
+	source TEXT NOT NULL,
+	pressure_json TEXT NOT NULL,
+	recorded_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_balloon_pressure_session_recorded
+	ON balloon_pressure_snapshots(session_id, recorded_at DESC);
+
+CREATE TABLE IF NOT EXISTS balloon_host_validation_runs (
+	run_id TEXT PRIMARY KEY,
+	host TEXT NOT NULL,
+	case_id TEXT NOT NULL,
+	evidence_json TEXT NOT NULL,
+	recorded_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_balloon_host_validation_host_recorded
+	ON balloon_host_validation_runs(host, recorded_at DESC);
 `
 
 type SessionRow = {
@@ -124,6 +157,14 @@ type MemoryRow = {
 
 type ReleaseRow = {
 	packet_json: string
+}
+
+type HostValidationRow = {
+	evidence_json: string
+}
+
+type PressureSnapshotRow = {
+	pressure_json: string
 }
 
 type CountRow = {
@@ -417,6 +458,29 @@ export class BalloonStateStore {
 			.filter((row): row is ReleasePacket => row !== null)
 	}
 
+	saveDriftPressureSnapshot(snapshot: BalloonDriftPressureSnapshot): void {
+		this.ensureSession(snapshot.sessionId, snapshot.recordedAt)
+		this.db
+			.prepare("INSERT INTO balloon_pressure_snapshots (snapshot_id, session_id, source, pressure_json, recorded_at) VALUES (?, ?, ?, ?, ?)")
+			.run(snapshot.snapshotId, snapshot.sessionId, snapshot.source, JSON.stringify(snapshot), snapshot.recordedAt)
+		this.touchSession(snapshot.sessionId, snapshot.recordedAt)
+	}
+
+	listDriftPressureSnapshots(sessionId: string, limit = 50): BalloonDriftPressureSnapshot[] {
+		const rows = this.db
+			.prepare("SELECT pressure_json FROM balloon_pressure_snapshots WHERE session_id = ? ORDER BY recorded_at DESC LIMIT ?")
+			.all(sessionId, limit) as PressureSnapshotRow[]
+		return rows
+			.map((row) => {
+				try {
+					return JSON.parse(row.pressure_json) as BalloonDriftPressureSnapshot
+				} catch {
+					return null
+				}
+			})
+			.filter((row): row is BalloonDriftPressureSnapshot => row !== null)
+	}
+
 	getSessionSummary(sessionId: string): BalloonSessionSummary | null {
 		const session = this.db.prepare("SELECT session_id, created_at, updated_at FROM balloon_sessions WHERE session_id = ?").get(sessionId) as
 			| SessionRow
@@ -445,6 +509,30 @@ export class BalloonStateStore {
 		return this.listSessionIds()
 			.map((sessionId) => this.getSessionSummary(sessionId))
 			.filter((summary): summary is BalloonSessionSummary => summary !== null)
+	}
+
+	saveHostValidationEvidence(evidence: BalloonHostValidationEvidence): void {
+		this.db
+			.prepare("INSERT INTO balloon_host_validation_runs (run_id, host, case_id, evidence_json, recorded_at) VALUES (?, ?, ?, ?, ?)")
+			.run(evidence.runId, evidence.host, evidence.caseId, JSON.stringify(evidence), evidence.recordedAt)
+		if (evidence.sessionId) this.touchSession(evidence.sessionId, evidence.recordedAt)
+	}
+
+	listHostValidationEvidence(host?: BalloonHostKind, limit = 100): BalloonHostValidationEvidence[] {
+		const rows = host
+			? (this.db
+					.prepare("SELECT evidence_json FROM balloon_host_validation_runs WHERE host = ? ORDER BY recorded_at DESC LIMIT ?")
+					.all(host, limit) as HostValidationRow[])
+			: (this.db.prepare("SELECT evidence_json FROM balloon_host_validation_runs ORDER BY recorded_at DESC LIMIT ?").all(limit) as HostValidationRow[])
+		return rows
+			.map((row) => {
+				try {
+					return JSON.parse(row.evidence_json) as BalloonHostValidationEvidence
+				} catch {
+					return null
+				}
+			})
+			.filter((row): row is BalloonHostValidationEvidence => row !== null)
 	}
 }
 

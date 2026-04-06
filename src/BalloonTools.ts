@@ -1,13 +1,39 @@
+import crypto from "node:crypto"
+import fs from "node:fs"
+import path from "node:path"
+
 import type {
+	BalloonDriftPressure,
+	BalloonDriftPressureHistorySummary,
+	BalloonDriftPressureSnapshot,
 	BalloonGap,
+	BalloonHostConfigRoot,
+	BalloonHostFlowKind,
+	BalloonHostFlowPacket,
+	BalloonHostKind,
+	BalloonHostPromptPacket,
+	BalloonHostReadinessTier,
+	BalloonHostValidationCaseEvidenceRollup,
+	BalloonHostValidationCase,
+	BalloonHostValidationCaseId,
+	BalloonHostValidationEvidence,
+	BalloonHostValidationEvidenceSummary,
+	BalloonHostValidationResultStatus,
+	BalloonHostValidationSuite,
+	BalloonInstallDiagnostics,
+	BalloonHostSetupPacket,
+	BalloonHostSetupValidation,
+	BalloonHostSurface,
 	BalloonBenchmarkDimensionScore,
 	BalloonBenchmarkLaneTotals,
 	BalloonBenchmarkLaneScore,
 	BalloonBenchmarkScorecard,
 	BalloonBenchmarkScoreDimension,
+	BalloonPersistentDriftBias,
 	BalloonSessionSummary,
 	BenchmarkLaneComparison,
 	HiddenRequirement,
+	LongSessionCheckpointMode,
 	LongSessionBenchmarkCheckpoint,
 	LongSessionBenchmarkCheckpointScore,
 	LongSessionBenchmarkResult,
@@ -24,9 +50,20 @@ import type {
 	StructuredProfile,
 } from "./types"
 import { BalloonStateStore } from "./BalloonStateStore"
-import { auditLatestTurn, buildProxyTrickle, buildStructuredProfile, detectHiddenRequirements, retrieveRelevantTurns, summarizeMemoryPromotion } from "./BalloonAnalysis"
+import {
+	auditLatestTurn,
+	buildDriftPressure,
+	buildPersistentDriftBias,
+	buildProxyTrickle,
+	buildStructuredProfile,
+	createDriftPressureSnapshot,
+	detectHiddenRequirements,
+	retrieveRelevantTurns,
+	summarizeDriftPressureHistory,
+	summarizeMemoryPromotion,
+} from "./BalloonAnalysis"
 import { buildBalloonRepairBundle } from "./BalloonRepair"
-import { buildReviewPromptBundle } from "./BalloonPrompts"
+import { buildReviewPromptBundle, getBalloonPrompt, listBalloonPrompts } from "./BalloonPrompts"
 import { buildStagedBalloonResult } from "./BalloonStaged"
 import { buildSlopCodeProblemPreparation, buildSlopCodeStarterBenchmarkPlan, buildSlopCodeStarterSuite, getBenchmarkScoreDimensions } from "./SlopCodeBench"
 
@@ -85,6 +122,10 @@ function asString(value: unknown): string | null {
 	return typeof value === "string" && value.trim().length > 0 ? value.trim() : null
 }
 
+function asRecordValue(value: unknown): Record<string, unknown> | null {
+	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+}
+
 function asPositiveInt(value: unknown, fallback: number): number {
 	if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.floor(value)
 	if (typeof value === "string" && /^\d+$/u.test(value)) return Math.max(1, Number.parseInt(value, 10))
@@ -102,6 +143,41 @@ function asPositiveIntArray(value: unknown, fallback: number[]): number[] {
 function asStringArray(value: unknown): string[] {
 	if (!Array.isArray(value)) return []
 	return value.map((entry) => asString(entry)).filter((entry): entry is string => entry !== null)
+}
+
+function parseCheckpointMode(value: unknown, fallback: LongSessionCheckpointMode = "turn_count"): LongSessionCheckpointMode {
+	if (typeof value !== "string") return fallback
+	switch (value.trim().toLowerCase()) {
+		case "assistant_checkpoint":
+			return "assistant_checkpoint"
+		case "turn_count":
+		default:
+			return fallback
+	}
+}
+
+function toPortablePath(value: string): string {
+	return value.replace(/\\/g, "/")
+}
+
+function parseHostKind(value: unknown, fallback: BalloonHostKind = "vscode"): BalloonHostKind {
+	if (typeof value !== "string") return fallback
+	switch (value.trim().toLowerCase()) {
+		case "cline":
+			return "cline"
+		case "roo":
+		case "roo_code":
+			return "roo_code"
+		case "claude":
+		case "claude_desktop":
+			return "claude_desktop"
+		case "generic":
+		case "generic_json":
+			return "generic_json"
+		case "vscode":
+		default:
+			return fallback
+	}
 }
 
 function asTurns(value: unknown): Array<{ role: string; content: string; timestamp?: string }> {
@@ -136,6 +212,49 @@ function formatGaps(gaps: BalloonGap[]): string {
 	return gaps.map((gap, index) => `${index + 1}. [${gap.severity}] ${gap.title} - ${gap.description}`).join("\n")
 }
 
+function formatDriftPressure(pressure: BalloonDriftPressure): string {
+	return [
+		`Score: ${pressure.score}/100`,
+		`Level: ${pressure.level}`,
+		`Dominant gap types: ${pressure.dominantGapTypes.join(", ") || "none"}`,
+		`Request coverage: ${pressure.requestCoverage}`,
+		`Profile anchor coverage: ${pressure.profileAnchorCoverage}`,
+		...(pressure.reasons.length > 0 ? ["Reasons", ...pressure.reasons.map((reason, index) => `${index + 1}. ${reason}`)] : ["Reasons", "No major drift pressure recorded."]),
+	].join("\n")
+}
+
+function formatDriftPressureHistory(summary: BalloonDriftPressureHistorySummary): string {
+	return [
+		`Total snapshots: ${summary.totalSnapshots}`,
+		`Latest score: ${summary.latestScore ?? "none"}`,
+		`Latest level: ${summary.latestLevel ?? "none"}`,
+		`Peak score: ${summary.peakScore ?? "none"}`,
+		`Average score: ${summary.averageScore ?? "none"}`,
+		`Trend: ${summary.trend}`,
+		...(summary.reasons.length > 0 ? ["Reasons", ...summary.reasons.map((reason, index) => `${index + 1}. ${reason}`)] : []),
+	].join("\n")
+}
+
+function buildDriftPressureHistorySummary(store: BalloonStateStore, sessionId: string, limit = 50): BalloonDriftPressureHistorySummary {
+	return summarizeDriftPressureHistory(sessionId, store.listDriftPressureSnapshots(sessionId, limit))
+}
+
+function persistDriftPressureSnapshot(
+	store: BalloonStateStore,
+	input: {
+		sessionId: string
+		source: BalloonDriftPressureSnapshot["source"]
+		turnCount: number
+		requestText?: string | null
+		latestResponse?: string | null
+		pressure: BalloonDriftPressure
+	},
+): BalloonDriftPressureSnapshot {
+	const snapshot = createDriftPressureSnapshot(input)
+	store.saveDriftPressureSnapshot(snapshot)
+	return snapshot
+}
+
 function formatHiddenRequirements(requirements: HiddenRequirement[]): string {
 	if (requirements.length === 0) return "No hidden requirements detected."
 	return requirements.map((requirement, index) => `${index + 1}. ${requirement.requirement} - ${requirement.rationale}${requirement.coveredByResponse ? " [already covered]" : ""}`).join("\n")
@@ -148,28 +267,40 @@ function formatList(values: string[], fallback: string): string {
 
 function formatRetrievalHits(hits: RetrievalHit[]): string {
 	if (hits.length === 0) return "No targeted retrieval hits found."
-	return hits.map((hit, index) => `${index + 1}. (${hit.role}, score=${hit.score}) ${hit.content}`).join("\n")
+	return hits
+		.map((hit, index) => `${index + 1}. (${hit.role}, score=${hit.score}) ${hit.content}${hit.biasReasons.length > 0 ? ` [bias: ${hit.biasReasons.join(", ")}]` : ""}`)
+		.join("\n")
 }
 
 function formatTrickle(trickle: ProxyTrickle): string {
-	return [trickle.summary, "", trickle.deliveryText].join("\n")
+	const persistentFocus = trickle.persistentFocus ?? []
+	return [trickle.summary, ...(persistentFocus.length > 0 ? ["", `Persistent focus: ${persistentFocus.join(", ")}`] : []), "", trickle.deliveryText].join("\n")
 }
 
 function formatReleasePacket(packet: ReleasePacket): string {
+	const persistentFocus = packet.persistentFocus ?? []
+	const focusLine = persistentFocus.length > 0 ? [`Persistent focus: ${persistentFocus.join(", ")}`] : []
 	const releasedLines =
 		packet.released.length > 0
 			? packet.released
 					.slice(0, 6)
-					.map((item, index) => `${index + 1}. ${item.sourceText} [${item.sourceKind}, score=${item.similarityScore.toFixed(2)}, threshold=${item.threshold.toFixed(2)}]`)
+					.map(
+						(item, index) =>
+							`${index + 1}. ${item.sourceText} [${item.sourceKind}, score=${item.similarityScore.toFixed(2)}, threshold=${item.threshold.toFixed(2)}${item.biasReasons.length > 0 ? `, bias=${item.biasReasons.join(",")}` : ""}]`,
+					)
 			: ["No released corrections."]
 	const heldLines =
 		packet.held.length > 0
 			? packet.held
 					.slice(0, 4)
-					.map((item, index) => `${index + 1}. ${item.sourceText} [${item.sourceKind}, score=${item.similarityScore.toFixed(2)}, threshold=${item.threshold.toFixed(2)}]`)
+					.map(
+						(item, index) =>
+							`${index + 1}. ${item.sourceText} [${item.sourceKind}, score=${item.similarityScore.toFixed(2)}, threshold=${item.threshold.toFixed(2)}${item.biasReasons.length > 0 ? `, bias=${item.biasReasons.join(",")}` : ""}]`,
+					)
 			: ["No held corrections."]
 	return [
 		packet.summary,
+		...focusLine,
 		"",
 		packet.deliveryText,
 		"",
@@ -195,6 +326,9 @@ function formatStagedResult(result: StagedBalloonResult): string {
 		`Thresholds: ${result.thresholds.join(", ")}`,
 		`Forced stage count: ${result.forcedStageCount ?? "none"}`,
 		`Active stages: ${result.activeStageCount}`,
+		"",
+		"Drift pressure",
+		formatDriftPressure(result.driftPressure),
 		"",
 		...stageLines,
 		"",
@@ -235,16 +369,42 @@ function formatPromptMessages(messages: Array<{ role: string; content?: { text?:
 		.join("\n\n")
 }
 
-function buildNextTurnStance(profile: StructuredProfile, hiddenRequirements: HiddenRequirement[], trickle: ProxyTrickle): string[] {
+function formatPersistentBias(bias: BalloonPersistentDriftBias): string {
+	return [
+		`Focus order: ${bias.focusOrder.join(", ") || "none"}`,
+		`Repeated gap types: ${bias.repeatedGapTypes.join(", ") || "none"}`,
+		`Sustained pressure: ${bias.sustainedPressure ? "yes" : "no"}`,
+		...(bias.reasons.length > 0 ? ["Reasons", ...bias.reasons.map((reason, index) => `${index + 1}. ${reason}`)] : []),
+	].join("\n")
+}
+
+function buildNextTurnStance(
+	profile: StructuredProfile,
+	hiddenRequirements: HiddenRequirement[],
+	driftPressure: BalloonDriftPressure,
+	trickle: ProxyTrickle,
+	persistentBias: BalloonPersistentDriftBias,
+): string[] {
 	const missingRequirements = hiddenRequirements.filter((requirement) => !requirement.coveredByResponse).map((requirement) => requirement.requirement)
 	const architectureDirection = profile.architectureDirection.find((entry) => !profile.protectedAreas.includes(entry))
+	const protectedInterface = profile.protectedInterfaces[0]
+	const styleRequirement = profile.styleRequirements[0]
 	return [
+		...(persistentBias.focusOrder.includes("architecture") ? ["Persistent focus: recover architecture direction first."] : []),
+		...(persistentBias.focusOrder.includes("verification") ? ["Persistent focus: keep verification obligations visible in the next turn."] : []),
+		...(driftPressure.level === "critical"
+			? ["Priority: correct the drift before widening scope."]
+			: driftPressure.level === "high"
+				? ["Priority: re-anchor the next turn before adding polish."]
+				: []),
 		...(profile.protectedAreas[0] ? [`Avoid changing: ${profile.protectedAreas[0]}`] : []),
+		...(driftPressure.needsInterfaceRecovery && protectedInterface ? [`Preserve interface: ${protectedInterface}`] : []),
 		...(architectureDirection ? [`Preserve direction: ${architectureDirection}`] : []),
 		...(profile.verificationObligations[0] ? [`Verify: ${profile.verificationObligations[0]}`] : []),
+		...(driftPressure.needsStyleRecovery && styleRequirement ? [`Keep style/type pressure: ${styleRequirement}`] : []),
 		...(missingRequirements.length > 0 ? [`Include: ${missingRequirements.slice(0, 3).join(", ")}`] : []),
 		...(trickle.priorityInstructions[0] ? [`Pressure: ${trickle.priorityInstructions[0]}`] : []),
-	].slice(0, 4)
+	].slice(0, 5)
 }
 
 function formatSessionSummary(summary: BalloonSessionSummary): string {
@@ -312,6 +472,7 @@ function buildBenchmarkLaneComparison(store: BalloonStateStore, sessionId: strin
 		latestResponse: baseline.latestResponse,
 		baselineReply,
 		deterministicReply: baseline.repairedReply,
+		deterministicDriftPressure: baseline.driftPressure,
 		assistReply: assist.repairedReply,
 		stagedReply: staged.stagedReply,
 		deterministicCorrectionSummary: baseline.correctionSummary,
@@ -329,15 +490,28 @@ function buildBenchmarkLaneComparison(store: BalloonStateStore, sessionId: strin
 	}
 }
 
-function resolveCheckpointTurns(turns: Array<{ role: string; content: string; timestamp?: string }>, requestedCheckpoints: number[]): Array<{ checkpoint: number; actualTurnCount: number }> {
+function resolveCheckpointTurns(
+	turns: Array<{ role: string; content: string; timestamp?: string }>,
+	requestedCheckpoints: number[],
+	checkpointMode: LongSessionCheckpointMode,
+): Array<{ checkpoint: number; actualTurnCount: number }> {
 	const resolved: Array<{ checkpoint: number; actualTurnCount: number }> = []
 	const seen = new Set<number>()
+	const assistantTurnCounts = turns
+		.map((turn, index) => ({ role: turn.role, turnCount: index + 1 }))
+		.filter((entry) => entry.role === "assistant")
+		.map((entry) => entry.turnCount)
 	for (const checkpoint of [...requestedCheckpoints].sort((left, right) => left - right)) {
-		const capped = Math.min(checkpoint, turns.length)
-		let index = capped - 1
-		while (index >= 0 && turns[index]?.role !== "assistant") index -= 1
-		if (index < 0) continue
-		const actualTurnCount = index + 1
+		let actualTurnCount: number | null = null
+		if (checkpointMode === "assistant_checkpoint") {
+			actualTurnCount = assistantTurnCounts[checkpoint - 1] ?? null
+		} else {
+			const capped = Math.min(checkpoint, turns.length)
+			let index = capped - 1
+			while (index >= 0 && turns[index]?.role !== "assistant") index -= 1
+			if (index >= 0) actualTurnCount = index + 1
+		}
+		if (actualTurnCount === null) continue
 		if (seen.has(actualTurnCount)) continue
 		const checkpointTurns = turns.slice(0, actualTurnCount)
 		if (!findLatestTurnContent(checkpointTurns, "user") || !findLatestTurnContent(checkpointTurns, "assistant")) continue
@@ -352,6 +526,7 @@ function formatLongSessionCheckpoint(checkpoint: LongSessionBenchmarkCheckpoint)
 		`Requested checkpoint: ${checkpoint.checkpoint}`,
 		`Executed turn count: ${checkpoint.actualTurnCount}`,
 		`Checkpoint session: ${checkpoint.checkpointSessionId}`,
+		`Drift pressure: ${checkpoint.driftPressure.level} (${checkpoint.driftPressure.score}/100)`,
 		`Assist semantic status: ${checkpoint.comparison.assistSemanticCara.status}`,
 		`Staged active stages: ${checkpoint.comparison.stagedActiveStageCount}`,
 		`Assist differs from deterministic: ${checkpoint.comparison.assistDiffers ? "yes" : "no"}`,
@@ -408,6 +583,7 @@ function formatSlopCodeProblemPreparation(result: SlopCodeProblemPreparation): s
 		`Checkpoint count: ${result.entry.checkpointCount}`,
 		`Recommended session id: ${result.recommendedSessionId}`,
 		`Recommended checkpoint batch: ${result.entry.recommendedCheckpointBatch.join(", ")}`,
+		`Recommended checkpoint mode: ${result.recommendedCheckpointMode}`,
 		`Force staged count: ${result.entry.recommendedForceStageCount}`,
 		`Long-session thresholds: ${result.entry.recommendedLongSessionThresholds.join(" / ")}`,
 		"",
@@ -436,6 +612,7 @@ function formatSlopCodeStarterBenchmarkPlan(plan: SlopCodeStarterBenchmarkPlan):
 		`${index + 1}. ${problem.problemName} [${problem.category}, ${problem.difficulty}]`,
 		`Session id: ${problem.recommendedSessionId}`,
 		`Checkpoint batch: ${problem.recommendedCheckpointBatch.join(", ")}`,
+		`Checkpoint mode: ${problem.recommendedCheckpointMode}`,
 		`Force stage count: ${problem.recommendedForceStageCount}`,
 		`Long-session thresholds: ${problem.recommendedLongSessionThresholds.join(" / ")}`,
 		`Score focus: ${problem.scoreFocus.join(" | ")}`,
@@ -780,6 +957,7 @@ function buildLongSessionBenchmarkResult(
 		turns?: Array<{ role: string; content: string; timestamp?: string }>
 		mergeMode?: string | null
 		checkpoints?: unknown
+		checkpointMode?: unknown
 	},
 ): LongSessionBenchmarkResult | null {
 	const incomingTurns = options.turns ?? []
@@ -791,12 +969,15 @@ function buildLongSessionBenchmarkResult(
 	const storedTurns = store.getTurns(sessionId, 5000)
 	if (storedTurns.length === 0) return null
 	const requestedCheckpoints = asPositiveIntArray(options.checkpoints, [10, 25, 50])
+	const checkpointMode = parseCheckpointMode(options.checkpointMode)
 	const checkpointSpecs = resolveCheckpointTurns(
 		storedTurns.map((turn) => ({ role: turn.role, content: turn.content, timestamp: turn.timestamp })),
 		requestedCheckpoints,
+		checkpointMode,
 	)
 	if (checkpointSpecs.length === 0) return null
 	const executedCheckpoints: LongSessionBenchmarkCheckpoint[] = []
+	const pressureSnapshots: BalloonDriftPressureSnapshot[] = []
 	for (const checkpoint of checkpointSpecs) {
 		const checkpointTurns = storedTurns
 			.slice(0, checkpoint.actualTurnCount)
@@ -811,6 +992,16 @@ function buildLongSessionBenchmarkResult(
 			stageThresholds: options.stageThresholds,
 		})
 		if (!comparison) return null
+		const pressureSnapshot = createDriftPressureSnapshot({
+			sessionId: checkpointSessionId,
+			source: "repair_packet",
+			turnCount: checkpoint.actualTurnCount,
+			requestText: comparison.requestText,
+			latestResponse: comparison.latestResponse,
+			pressure: comparison.deterministicDriftPressure,
+		})
+		store.saveDriftPressureSnapshot(pressureSnapshot)
+		pressureSnapshots.push(pressureSnapshot)
 		executedCheckpoints.push({
 			checkpoint: checkpoint.checkpoint,
 			actualTurnCount: checkpoint.actualTurnCount,
@@ -818,13 +1009,16 @@ function buildLongSessionBenchmarkResult(
 			requestText: comparison.requestText,
 			latestResponse: comparison.latestResponse,
 			comparison,
+			driftPressure: comparison.deterministicDriftPressure,
 		})
 	}
 	return {
 		sessionId,
 		totalTurnCount: storedTurns.length,
 		requestedCheckpoints,
+		checkpointMode,
 		executedCheckpoints,
+		pressureHistory: summarizeDriftPressureHistory(sessionId, pressureSnapshots),
 		forceStageCount: typeof options.forceStageCount === "number" && Number.isFinite(options.forceStageCount) ? Math.floor(options.forceStageCount) : null,
 	}
 }
@@ -836,6 +1030,7 @@ function buildLongSessionBenchmarkScoreResult(
 		turns?: Array<{ role: string; content: string; timestamp?: string }>
 		mergeMode?: string | null
 		checkpoints?: unknown
+		checkpointMode?: unknown
 	},
 ): LongSessionBenchmarkScoreResult | null {
 	const benchmark = buildLongSessionBenchmarkResult(store, sessionId, options)
@@ -856,6 +1051,7 @@ function buildLongSessionBenchmarkScoreResult(
 			actualTurnCount: checkpoint.actualTurnCount,
 			checkpointSessionId: checkpoint.checkpointSessionId,
 			scorecard,
+			driftPressure: checkpoint.driftPressure,
 		})
 		accumulateLaneTotals(laneTotals, scorecard)
 	}
@@ -863,7 +1059,9 @@ function buildLongSessionBenchmarkScoreResult(
 		sessionId: benchmark.sessionId,
 		totalTurnCount: benchmark.totalTurnCount,
 		requestedCheckpoints: benchmark.requestedCheckpoints,
+		checkpointMode: benchmark.checkpointMode,
 		executedCheckpoints,
+		pressureHistory: benchmark.pressureHistory,
 		laneTotals,
 		topLanes: topLanesFromTotals(laneTotals),
 	}
@@ -895,6 +1093,7 @@ function buildSlopCodeStarterSuiteSummary(
 					forceStageCount: options.forceStageCount ?? problem.recommendedForceStageCount,
 					stageThresholds: options.stageThresholds ?? problem.recommendedLongSessionThresholds,
 					checkpoints: problem.recommendedCheckpointBatch,
+					checkpointMode: problem.recommendedCheckpointMode,
 				})
 				if (!scoreResult) warnings.push("Stored session exists, but Balloon could not build a checkpointed score summary from it.")
 			}
@@ -960,6 +1159,11 @@ function formatLongSessionBenchmarkScoreResult(result: LongSessionBenchmarkScore
 		`Session: ${result.sessionId}`,
 		`Total turns: ${result.totalTurnCount}`,
 		`Requested checkpoints: ${result.requestedCheckpoints.join(", ")}`,
+		`Checkpoint mode: ${result.checkpointMode}`,
+		"",
+		"Pressure history",
+		formatDriftPressureHistory(result.pressureHistory),
+		"",
 		`Top lane(s): ${result.topLanes.join(", ")}`,
 		`Baseline total: ${result.laneTotals.baseline}/${result.laneTotals.maxTotal}`,
 		`Deterministic total: ${result.laneTotals.deterministic}/${result.laneTotals.maxTotal}`,
@@ -971,6 +1175,7 @@ function formatLongSessionBenchmarkScoreResult(result: LongSessionBenchmarkScore
 			`Requested checkpoint: ${checkpoint.checkpoint}`,
 			`Executed turn count: ${checkpoint.actualTurnCount}`,
 			`Checkpoint session: ${checkpoint.checkpointSessionId}`,
+			`Drift pressure: ${checkpoint.driftPressure.level} (${checkpoint.driftPressure.score}/100)`,
 			formatBenchmarkScorecard(checkpoint.scorecard),
 			"",
 		]),
@@ -1008,6 +1213,1492 @@ function formatSlopCodeStarterSuiteSummary(summary: SlopCodeStarterSuiteSummary)
 			...(problem.warnings.length > 0 ? problem.warnings.map((warning, warningIndex) => `Warning ${warningIndex + 1}: ${warning}`) : []),
 			"",
 		]),
+	].join("\n")
+}
+
+type StarterSuiteArtifactProblemExport = {
+	problemName: string
+	sessionId: string
+	sessionPresent: boolean
+	covered: boolean
+	executedCheckpoints: number[]
+	topLanes: Array<BalloonBenchmarkLaneScore["lane"]>
+	laneTotals: BalloonBenchmarkLaneTotals | null
+	warnings: string[]
+	regressions: string[]
+	jsonPath: string
+	markdownPath: string
+}
+
+type StarterSuiteArtifactExportBundle = {
+	suiteName: string
+	outputDir: string
+	problemsDir: string
+	generatedAt: string
+	datasetStatus: SlopCodeStarterSuiteSummary["datasetStatus"]
+	totalProblems: number
+	coveredProblems: number
+	laneTotals: BalloonBenchmarkLaneTotals
+	topLanes: Array<BalloonBenchmarkLaneScore["lane"]>
+	regressions: string[]
+	summaryJsonPath: string
+	summaryMarkdownPath: string
+	problems: StarterSuiteArtifactProblemExport[]
+}
+
+function makeArtifactStamp(): string {
+	return new Date().toISOString().replace(/:/g, "-").replace(/\.\d{3}Z$/u, "Z")
+}
+
+function safeArtifactName(value: string): string {
+	return value
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+/g, "")
+		.replace(/-+$/g, "") || "artifact"
+}
+
+function resolveArtifactOutputDir(requestedOutputDir?: string | null): string {
+	if (requestedOutputDir && requestedOutputDir.trim().length > 0) {
+		return path.resolve(process.cwd(), requestedOutputDir.trim())
+	}
+	return path.resolve(process.cwd(), "benchmark_artifacts", "slopcode_starter_suite", makeArtifactStamp())
+}
+
+function ensureArtifactDir(dirPath: string): void {
+	fs.mkdirSync(dirPath, { recursive: true })
+}
+
+function collectLaneRegressions(laneTotals: BalloonBenchmarkLaneTotals): string[] {
+	const notes: string[] = []
+	if (laneTotals.assist < laneTotals.deterministic) {
+		notes.push(`Assist trailed deterministic by ${laneTotals.deterministic - laneTotals.assist} point(s).`)
+	}
+	if (laneTotals.staged < laneTotals.deterministic) {
+		notes.push(`Staged trailed deterministic by ${laneTotals.deterministic - laneTotals.staged} point(s).`)
+	}
+	if (laneTotals.assist < laneTotals.baseline) {
+		notes.push(`Assist fell below baseline by ${laneTotals.baseline - laneTotals.assist} point(s).`)
+	}
+	if (laneTotals.staged < laneTotals.baseline) {
+		notes.push(`Staged fell below baseline by ${laneTotals.baseline - laneTotals.staged} point(s).`)
+	}
+	return notes
+}
+
+function formatLaneTotalsBlock(laneTotals: BalloonBenchmarkLaneTotals | null): string[] {
+	if (!laneTotals) return ["Lane totals: not available yet"]
+	return [
+		`Baseline total: ${laneTotals.baseline}/${laneTotals.maxTotal}`,
+		`Deterministic total: ${laneTotals.deterministic}/${laneTotals.maxTotal}`,
+		`Assist total: ${laneTotals.assist}/${laneTotals.maxTotal}`,
+		`Staged total: ${laneTotals.staged}/${laneTotals.maxTotal}`,
+	]
+}
+
+function formatStarterSuiteArtifactProblemMarkdown(options: {
+	problem: SlopCodeStarterSuiteSummary["problems"][number]
+	regressions: string[]
+	generatedAt: string
+}): string {
+	const { problem, regressions, generatedAt } = options
+	return [
+		`# SCBench Starter Artifact: ${problem.problemName}`,
+		"",
+		`Generated: ${generatedAt}`,
+		`Session id: ${problem.sessionId}`,
+		`Session present: ${problem.sessionPresent ? "yes" : "no"}`,
+		`Recommended checkpoints: ${problem.recommendedCheckpoints.join(", ")}`,
+		`Executed checkpoints: ${problem.executedCheckpoints.length > 0 ? problem.executedCheckpoints.join(", ") : "none"}`,
+		"",
+		"Totals",
+		...formatLaneTotalsBlock(problem.scoreResult?.laneTotals ?? null),
+		"",
+		"Top lane(s)",
+		problem.scoreResult?.topLanes.join(", ") || "none",
+		"",
+		"Regressions",
+		...(regressions.length > 0 ? regressions.map((note, index) => `${index + 1}. ${note}`) : ["None recorded."]),
+		"",
+		"Warnings",
+		...(problem.warnings.length > 0 ? problem.warnings.map((warning, index) => `${index + 1}. ${warning}`) : ["None."]),
+		"",
+		problem.scoreResult ? formatLongSessionBenchmarkScoreResult(problem.scoreResult) : "No scored checkpoint sequence is available for this problem yet.",
+	].join("\n")
+}
+
+function formatStarterSuiteArtifactSummaryMarkdown(bundle: StarterSuiteArtifactExportBundle): string {
+	return [
+		`# ${bundle.suiteName} Artifact Export`,
+		"",
+		`Generated: ${bundle.generatedAt}`,
+		`Output directory: ${bundle.outputDir}`,
+		"",
+		formatSlopCodeDatasetStatus(bundle.datasetStatus),
+		"",
+		`Covered problems: ${bundle.coveredProblems}/${bundle.totalProblems}`,
+		`Top lane(s): ${bundle.topLanes.join(", ") || "none"}`,
+		...formatLaneTotalsBlock(bundle.laneTotals),
+		"",
+		"Suite regressions",
+		...(bundle.regressions.length > 0 ? bundle.regressions.map((note, index) => `${index + 1}. ${note}`) : ["None recorded."]),
+		"",
+		"Problem artifacts",
+		...bundle.problems.flatMap((problem, index) => [
+			`${index + 1}. ${problem.problemName}`,
+			`Session id: ${problem.sessionId}`,
+			`Covered: ${problem.covered ? "yes" : "no"}`,
+			`JSON: ${problem.jsonPath}`,
+			`Markdown: ${problem.markdownPath}`,
+			`Top lane(s): ${problem.topLanes.join(", ") || "none"}`,
+			...(problem.regressions.length > 0 ? problem.regressions.map((note, noteIndex) => `Regression ${noteIndex + 1}: ${note}`) : []),
+			...(problem.warnings.length > 0 ? problem.warnings.map((warning, warningIndex) => `Warning ${warningIndex + 1}: ${warning}`) : []),
+			"",
+		]),
+	].join("\n")
+}
+
+function buildStarterSuiteArtifactExport(
+	store: BalloonStateStore,
+	options: BenchmarkLaneOptions & {
+		datasetRoot?: string | null
+		problemNames?: string[]
+		outputDir?: string | null
+	},
+): StarterSuiteArtifactExportBundle | null {
+	const summary = buildSlopCodeStarterSuiteSummary(store, options)
+	if (summary.coveredProblems === 0) return null
+
+	const outputDir = resolveArtifactOutputDir(options.outputDir)
+	const problemsDir = path.join(outputDir, "problems")
+	const generatedAt = new Date().toISOString()
+	ensureArtifactDir(problemsDir)
+
+	const exportedProblems: StarterSuiteArtifactProblemExport[] = summary.problems.map((problem) => {
+		const regressions = problem.scoreResult ? collectLaneRegressions(problem.scoreResult.laneTotals) : []
+		const problemStem = safeArtifactName(problem.problemName)
+		const jsonPath = path.join(problemsDir, `${problemStem}.json`)
+		const markdownPath = path.join(problemsDir, `${problemStem}.md`)
+		const payload = {
+			generatedAt,
+			problem,
+			regressions,
+		}
+		fs.writeFileSync(jsonPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8")
+		fs.writeFileSync(markdownPath, `${formatStarterSuiteArtifactProblemMarkdown({ problem, regressions, generatedAt })}\n`, "utf8")
+		return {
+			problemName: problem.problemName,
+			sessionId: problem.sessionId,
+			sessionPresent: problem.sessionPresent,
+			covered: problem.scoreResult !== null,
+			executedCheckpoints: problem.executedCheckpoints,
+			topLanes: problem.scoreResult?.topLanes ?? [],
+			laneTotals: problem.scoreResult?.laneTotals ?? null,
+			warnings: problem.warnings,
+			regressions,
+			jsonPath,
+			markdownPath,
+		}
+	})
+
+	const regressions = collectLaneRegressions(summary.laneTotals)
+	const summaryJsonPath = path.join(outputDir, "summary.json")
+	const summaryMarkdownPath = path.join(outputDir, "summary.md")
+	const bundle: StarterSuiteArtifactExportBundle = {
+		suiteName: summary.suiteName,
+		outputDir,
+		problemsDir,
+		generatedAt,
+		datasetStatus: summary.datasetStatus,
+		totalProblems: summary.totalProblems,
+		coveredProblems: summary.coveredProblems,
+		laneTotals: summary.laneTotals,
+		topLanes: summary.topLanes,
+		regressions,
+		summaryJsonPath,
+		summaryMarkdownPath,
+		problems: exportedProblems,
+	}
+
+	fs.writeFileSync(summaryJsonPath, `${JSON.stringify(bundle, null, 2)}\n`, "utf8")
+	fs.writeFileSync(summaryMarkdownPath, `${formatStarterSuiteArtifactSummaryMarkdown(bundle)}\n`, "utf8")
+	return bundle
+}
+
+const BALLOON_HOST_SURFACES: BalloonHostSurface[] = [
+	{
+		host: "vscode",
+		displayName: "VS Code built-in MCP",
+		readinessTier: "recommended_first",
+		status: "best current path",
+		configRoot: "servers",
+		exampleConfigPath: "examples/vscode_mcp.example.json",
+		docsPath: "docs/INSTALL.md",
+		recommendedFirstTools: ["balloon_run_cycle", "balloon_repair_next_turn", "balloon_compare_benchmark_lanes"],
+		promptSensitiveSurfaces: ["balloon/repair-next-turn", "balloon/review-session-drift"],
+		restartHints: ["Restart the server entry after config changes.", "Start a fresh chat after the MCP server becomes healthy.", "If tools seem stale, use MCP: Reset Cached Tools."],
+		knownCaveats: ["Prompt routing can still vary by chat state.", "Older chat tabs can keep stale MCP state after server changes."],
+		notes: ["VS Code is the most exercised Balloon host path right now.", "The tool-first Balloon flows are the least fragile way to validate the install."],
+	},
+	{
+		host: "cline",
+		displayName: "Cline",
+		readinessTier: "promising",
+		status: "promising",
+		configRoot: "mcpServers",
+		exampleConfigPath: "examples/cline_mcp_settings.example.json",
+		docsPath: "docs/CLINE_QUICKSTART.md",
+		recommendedFirstTools: ["balloon_run_cycle", "balloon_repair_next_turn", "balloon_compare_benchmark_lanes"],
+		promptSensitiveSurfaces: ["balloon/repair-next-turn", "balloon/review-session-drift"],
+		restartHints: ["Restart the MCP server entry after config edits.", "Prefer a fresh chat after restarting Balloon.", "If tool lists look stale, restart Cline again."],
+		knownCaveats: ["Absolute cwd paths are safer on Windows.", "Prompt routing is more host-sensitive than the tool-first flows."],
+		notes: ["Cline has a real MCP surface that maps well to Balloon's tool-first flows.", "This host still needs more repeated validation than VS Code."],
+	},
+	{
+		host: "roo_code",
+		displayName: "Roo Code",
+		readinessTier: "experimental",
+		status: "experimental",
+		configRoot: "mcpServers",
+		exampleConfigPath: "examples/roo_mcp.example.json",
+		docsPath: "docs/ROO_CODE_QUICKSTART.md",
+		recommendedFirstTools: ["balloon_run_cycle", "balloon_repair_next_turn", "balloon_compare_benchmark_lanes"],
+		promptSensitiveSurfaces: ["balloon/repair-next-turn", "balloon/review-session-drift"],
+		restartHints: ["Restart the Balloon MCP entry after config edits.", "Start a fresh chat after restart.", "If tools appear stale, restart Roo again."],
+		knownCaveats: ["Local MCP behavior has shifted across Roo releases.", "Absolute cwd paths are safer on Windows."],
+		notes: ["Roo is meaningful for the long-term Balloon product vision.", "Treat the current setup as experimental until more real reruns exist."],
+	},
+	{
+		host: "claude_desktop",
+		displayName: "Claude Desktop-style JSON hosts",
+		readinessTier: "manual",
+		status: "manual but workable",
+		configRoot: "mcpServers",
+		exampleConfigPath: "examples/claude_desktop_config.example.json",
+		docsPath: "docs/HOST_COMPATIBILITY.md",
+		recommendedFirstTools: ["balloon_run_cycle", "balloon_repair_next_turn", "balloon_review_session_drift"],
+		promptSensitiveSurfaces: ["balloon/repair-next-turn", "balloon/review-session-drift"],
+		restartHints: ["Restart the host after config edits.", "Prefer a fresh chat after restart.", "Re-check command quoting and cwd if the server starts but tools fail."],
+		knownCaveats: ["Path handling and quoting vary by host build.", "Manual adaptation may be needed even when the JSON shape looks similar."],
+		notes: ["This bucket covers Claude Desktop-style JSON hosts and similar Claude/CLI MCP surfaces.", "Tool access and resource reads tend to be more reliable than prompt routing."],
+	},
+	{
+		host: "generic_json",
+		displayName: "Generic JSON MCP hosts",
+		readinessTier: "manual",
+		status: "manual but workable",
+		configRoot: "mcpServers",
+		exampleConfigPath: "examples/claude_desktop_config.example.json",
+		docsPath: "docs/HOST_COMPATIBILITY.md",
+		recommendedFirstTools: ["balloon_run_cycle", "balloon_repair_next_turn", "balloon_compare_benchmark_lanes"],
+		promptSensitiveSurfaces: ["balloon/repair-next-turn", "balloon/review-session-drift"],
+		restartHints: ["Restart the MCP entry after config edits.", "Use a fresh chat after restarting.", "If the host keeps stale tools, clear the host cache if supported."],
+		knownCaveats: ["You may need to adapt cwd, args, and quoting manually.", "Use the validator before assuming the config is correct."],
+		notes: ["This is the catch-all path for other stdio JSON hosts.", "Balloon's tool-first flows travel better across generic hosts than prompt-heavy flows."],
+	},
+]
+
+function cloneHostSurface(surface: BalloonHostSurface): BalloonHostSurface {
+	return {
+		...surface,
+		recommendedFirstTools: [...surface.recommendedFirstTools],
+		promptSensitiveSurfaces: [...surface.promptSensitiveSurfaces],
+		restartHints: [...surface.restartHints],
+		knownCaveats: [...surface.knownCaveats],
+		notes: [...surface.notes],
+	}
+}
+
+function getHostSurfaceCatalog(): BalloonHostSurface[] {
+	return BALLOON_HOST_SURFACES.map((surface) => cloneHostSurface(surface))
+}
+
+function getHostSurface(host: BalloonHostKind): BalloonHostSurface {
+	return cloneHostSurface(BALLOON_HOST_SURFACES.find((surface) => surface.host === host) ?? BALLOON_HOST_SURFACES[0]!)
+}
+
+function resolveHostRepoPath(requestedRepoPath?: string | null): { repoPath: string; explicit: boolean } {
+	if (requestedRepoPath && requestedRepoPath.trim().length > 0) {
+		return { repoPath: path.resolve(process.cwd(), requestedRepoPath.trim()), explicit: true }
+	}
+	return { repoPath: process.cwd(), explicit: false }
+}
+
+function resolveHostStartLayout(repoPath: string): { startArg: string; resolvedStartPath: string | null; buildReady: boolean } {
+	const candidates = [
+		{
+			marker: path.join(repoPath, "Ballon_architecture", "balloon_mcp_server", "src", "start.ts"),
+			startArg: toPortablePath(path.join("dist", "Ballon_architecture", "balloon_mcp_server", "src", "start.js")),
+			resolvedStartPath: path.join(repoPath, "dist", "Ballon_architecture", "balloon_mcp_server", "src", "start.js"),
+		},
+		{
+			marker: path.join(repoPath, "src", "start.ts"),
+			startArg: toPortablePath(path.join("dist", "src", "start.js")),
+			resolvedStartPath: path.join(repoPath, "dist", "src", "start.js"),
+		},
+	]
+	for (const candidate of candidates) {
+		if (fs.existsSync(candidate.resolvedStartPath)) {
+			return { startArg: candidate.startArg, resolvedStartPath: candidate.resolvedStartPath, buildReady: true }
+		}
+	}
+	for (const candidate of candidates) {
+		if (fs.existsSync(candidate.marker)) {
+			return { startArg: candidate.startArg, resolvedStartPath: null, buildReady: false }
+		}
+	}
+	return {
+		startArg: toPortablePath(path.join("dist", "src", "start.js")),
+		resolvedStartPath: null,
+		buildReady: false,
+	}
+}
+
+function buildHostArgs(options: {
+	startArg: string
+	dataDir: string
+	semanticCaraMode?: string | null
+	semanticCaraAdapter?: string | null
+	semanticCaraTimeoutMs?: unknown
+	semanticCaraMaxNotes?: unknown
+}): string[] {
+	const args = [options.startArg, "--data-dir", options.dataDir]
+	const semanticCaraMode = asString(options.semanticCaraMode)
+	if (semanticCaraMode && semanticCaraMode !== "off") {
+		args.push("--semantic-cara-mode", semanticCaraMode)
+		const semanticCaraAdapter = asString(options.semanticCaraAdapter)
+		if (semanticCaraAdapter) args.push("--semantic-cara-adapter", semanticCaraAdapter)
+		if (typeof options.semanticCaraTimeoutMs === "number" && Number.isFinite(options.semanticCaraTimeoutMs) && options.semanticCaraTimeoutMs > 0) {
+			args.push("--semantic-cara-timeout-ms", String(Math.floor(options.semanticCaraTimeoutMs)))
+		}
+		if (typeof options.semanticCaraMaxNotes === "number" && Number.isFinite(options.semanticCaraMaxNotes) && options.semanticCaraMaxNotes > 0) {
+			args.push("--semantic-cara-max-notes", String(Math.floor(options.semanticCaraMaxNotes)))
+		}
+	}
+	return args.map((arg) => (arg.includes("\\") ? toPortablePath(arg) : arg))
+}
+
+function buildHostConfigSnippet(options: {
+	host: BalloonHostSurface
+	serverName: string
+	command: string
+	args: string[]
+	cwd: string
+}): string {
+	const serverConfig: Record<string, unknown> =
+		options.host.configRoot === "servers"
+			? {
+					type: "stdio",
+					command: options.command,
+					args: options.args,
+					cwd: options.cwd,
+				}
+			: {
+					command: options.command,
+					args: options.args,
+					cwd: options.cwd,
+				}
+	const payload =
+		options.host.configRoot === "servers"
+			? { servers: { [options.serverName]: serverConfig } }
+			: { mcpServers: { [options.serverName]: serverConfig } }
+	return JSON.stringify(payload, null, 2)
+}
+
+function buildHostSetupPacket(options: {
+	host?: unknown
+	repoPath?: unknown
+	dataDir?: unknown
+	serverName?: unknown
+	preferWorkspaceVariable?: unknown
+	semanticCaraMode?: unknown
+	semanticCaraAdapter?: unknown
+	semanticCaraTimeoutMs?: unknown
+	semanticCaraMaxNotes?: unknown
+}): BalloonHostSetupPacket {
+	const host = parseHostKind(options.host)
+	const surface = getHostSurface(host)
+	const repoPathInfo = resolveHostRepoPath(asString(options.repoPath))
+	const dataDir = toPortablePath(asString(options.dataDir) ?? ".balloon-mcp-demo")
+	const serverName = asString(options.serverName) ?? "balloon-mcp"
+	const startLayout = resolveHostStartLayout(repoPathInfo.repoPath)
+	const preferWorkspaceVariable = typeof options.preferWorkspaceVariable === "boolean" ? options.preferWorkspaceVariable : true
+	const cwd =
+		host === "vscode" && preferWorkspaceVariable && !repoPathInfo.explicit ? "${workspaceFolder}" : toPortablePath(path.resolve(repoPathInfo.repoPath))
+	const args = buildHostArgs({
+		startArg: startLayout.startArg,
+		dataDir,
+		semanticCaraMode: asString(options.semanticCaraMode),
+		semanticCaraAdapter: asString(options.semanticCaraAdapter),
+		semanticCaraTimeoutMs: options.semanticCaraTimeoutMs,
+		semanticCaraMaxNotes: options.semanticCaraMaxNotes,
+	})
+	const validationWarnings: string[] = []
+	if (!startLayout.buildReady) validationWarnings.push("Built Balloon start.js was not found yet. Run npm install and npm run build before using this host config.")
+	if (process.platform === "win32" && host !== "vscode") validationWarnings.push("On Windows, keep cwd as an absolute path for this host.")
+	if (asString(options.semanticCaraMode) === "assist" && !asString(options.semanticCaraAdapter)) {
+		validationWarnings.push("Assist mode needs --semantic-cara-adapter to be useful.")
+	}
+	return {
+		host,
+		displayName: surface.displayName,
+		readinessTier: surface.readinessTier,
+		status: surface.status,
+		configRoot: surface.configRoot,
+		repoPath: toPortablePath(path.resolve(repoPathInfo.repoPath)),
+		command: "node",
+		args,
+		cwd,
+		dataDir,
+		resolvedStartPath: startLayout.resolvedStartPath ? toPortablePath(path.resolve(startLayout.resolvedStartPath)) : null,
+		buildReady: startLayout.buildReady,
+		configSnippet: buildHostConfigSnippet({
+			host: surface,
+			serverName,
+			command: "node",
+			args,
+			cwd,
+		}),
+		exampleConfigPath: surface.exampleConfigPath,
+		docsPath: surface.docsPath,
+		recommendedFirstTools: [...surface.recommendedFirstTools],
+		promptSensitiveSurfaces: [...surface.promptSensitiveSurfaces],
+		restartHints: [...surface.restartHints],
+		validationWarnings,
+		firstRunChecklist: [
+			"Run npm install if dependencies are not present yet.",
+			"Run npm run build before connecting the host.",
+			"Run npm run verify:balloon:mcp for a fast health check.",
+			"Paste the config snippet into the host and restart the MCP entry.",
+			`Use ${surface.recommendedFirstTools.join(", ")} before trying prompt-heavy flows.`,
+		],
+	}
+}
+
+function findConfigRootRecord(parsed: Record<string, unknown>, root: BalloonHostConfigRoot): Record<string, unknown> | null {
+	return asRecordValue(parsed[root])
+}
+
+function containsPlaceholder(value: string | null): boolean {
+	return Boolean(value && /REPLACE_WITH_YOUR_/iu.test(value))
+}
+
+function resolveConfigCwd(options: {
+	cwd: string | null
+	baseDir: string
+	repoPathOverride: string | null
+}): string | null {
+	if (options.cwd && options.cwd.includes("${workspaceFolder}")) {
+		return options.repoPathOverride ? path.resolve(options.repoPathOverride) : null
+	}
+	if (options.cwd) {
+		return path.isAbsolute(options.cwd) ? path.resolve(options.cwd) : path.resolve(options.baseDir, options.cwd)
+	}
+	if (options.repoPathOverride) return path.resolve(options.repoPathOverride)
+	return null
+}
+
+function buildHostSetupValidation(options: {
+	host?: unknown
+	configPath?: unknown
+	configJson?: unknown
+	repoPath?: unknown
+	serverName?: unknown
+}): BalloonHostSetupValidation {
+	const host = parseHostKind(options.host)
+	const surface = getHostSurface(host)
+	const serverName = asString(options.serverName) ?? "balloon-mcp"
+	const repoPathOverride = asString(options.repoPath) ? path.resolve(process.cwd(), asString(options.repoPath) as string) : null
+	const errors: string[] = []
+	const warnings: string[] = []
+	const suggestedFixes: string[] = []
+	let configSource = "inline config"
+	let parsed: Record<string, unknown> | null = null
+	let baseDir = process.cwd()
+	const configPath = asString(options.configPath)
+	const configJson = asString(options.configJson)
+	if (configPath) {
+		const resolvedConfigPath = path.resolve(process.cwd(), configPath)
+		configSource = toPortablePath(resolvedConfigPath)
+		baseDir = path.dirname(resolvedConfigPath)
+		if (!fs.existsSync(resolvedConfigPath)) {
+			errors.push(`Config file was not found: ${toPortablePath(resolvedConfigPath)}`)
+		} else {
+			try {
+				parsed = asRecordValue(JSON.parse(fs.readFileSync(resolvedConfigPath, "utf8")))
+			} catch (err) {
+				errors.push(`Config file could not be parsed as JSON: ${err instanceof Error ? err.message : String(err)}`)
+			}
+		}
+	} else if (configJson) {
+		try {
+			parsed = asRecordValue(JSON.parse(configJson))
+		} catch (err) {
+			errors.push(`configJson could not be parsed as JSON: ${err instanceof Error ? err.message : String(err)}`)
+		}
+	} else {
+		errors.push("Provide either configPath or configJson.")
+	}
+	if (!parsed && errors.length === 0) errors.push("Config JSON must be an object.")
+
+	const expectedConfigRoot = surface.configRoot
+	const primaryRoot = parsed ? findConfigRootRecord(parsed, expectedConfigRoot) : null
+	const alternateRootName: BalloonHostConfigRoot = expectedConfigRoot === "servers" ? "mcpServers" : "servers"
+	const alternateRoot = parsed ? findConfigRootRecord(parsed, alternateRootName) : null
+	let actualConfigRoot: BalloonHostConfigRoot | "unknown" = "unknown"
+	let root = primaryRoot
+	if (primaryRoot) actualConfigRoot = expectedConfigRoot
+	else if (alternateRoot) {
+		actualConfigRoot = alternateRootName
+		root = alternateRoot
+		warnings.push(`This host usually expects the ${expectedConfigRoot} root, but the config uses ${alternateRootName}.`)
+	}
+	if (!root && parsed) errors.push(`No ${expectedConfigRoot} or ${alternateRootName} root was found in the config.`)
+
+	let serverEntry = root ? asRecordValue(root[serverName]) : null
+	if (!serverEntry && root) {
+		const entries = Object.entries(root).filter((entry) => asRecordValue(entry[1]) !== null)
+		if (entries.length === 1) {
+			serverEntry = asRecordValue(entries[0]?.[1])
+			warnings.push(`Using the only server entry (${entries[0]?.[0] ?? "unknown"}) because ${serverName} was not present.`)
+		}
+	}
+	const foundServerEntry = serverEntry !== null
+	if (!foundServerEntry && root) errors.push(`No MCP server entry named ${serverName} was found.`)
+
+	const command = asString(serverEntry?.command ?? null)
+	const args = Array.isArray(serverEntry?.args) ? serverEntry.args.map((entry) => asString(entry)).filter((entry): entry is string => entry !== null) : []
+	const cwd = asString(serverEntry?.cwd ?? null)
+	if (host === "vscode") {
+		const typeValue = asString(serverEntry?.type ?? null)
+		if (typeValue !== "stdio") warnings.push("VS Code usually expects type: stdio for Balloon MCP.")
+	}
+	if (!command) errors.push("The server entry is missing command.")
+	else if (!/(^|[\\/])node(?:\.exe)?$/iu.test(command) && command.toLowerCase() !== "node") warnings.push("The recommended command is node.")
+	if (containsPlaceholder(command)) errors.push("The command still contains a placeholder value.")
+	if (containsPlaceholder(cwd)) errors.push("The cwd still contains a placeholder value.")
+	if (args.length === 0) errors.push("The server entry is missing args.")
+	const startArg = args.find((arg) => /start\.(?:js|mjs|cjs)$/iu.test(arg) || arg.includes("start.js")) ?? null
+	if (!startArg) errors.push("The args do not point to Balloon start.js.")
+	if (containsPlaceholder(startArg)) errors.push("The start.js arg still contains a placeholder value.")
+	if (!args.includes("--data-dir")) warnings.push("Adding --data-dir keeps Balloon state isolated per host or test flow.")
+	const semanticAssistIndex = args.indexOf("--semantic-cara-mode")
+	if (semanticAssistIndex !== -1 && args[semanticAssistIndex + 1] === "assist" && !args.includes("--semantic-cara-adapter")) {
+		warnings.push("Assist mode is configured without --semantic-cara-adapter.")
+	}
+	if (process.platform === "win32" && cwd && !path.isAbsolute(cwd) && !cwd.includes("${workspaceFolder}") && host !== "vscode") {
+		warnings.push("Absolute cwd paths are safer on Windows for this host.")
+	}
+
+	const resolvedCwd = resolveConfigCwd({
+		cwd,
+		baseDir,
+		repoPathOverride,
+	})
+	let resolvedStartPath: string | null = null
+	let buildReady: boolean | null = null
+	if (startArg && (path.isAbsolute(startArg) || resolvedCwd)) {
+		resolvedStartPath = path.isAbsolute(startArg) ? path.resolve(startArg) : path.resolve(resolvedCwd as string, startArg)
+		buildReady = fs.existsSync(resolvedStartPath)
+		if (!buildReady) warnings.push(`Resolved Balloon start.js was not found: ${toPortablePath(resolvedStartPath)}`)
+	}
+	if (!cwd && host !== "generic_json") warnings.push("Setting cwd makes start.js resolution more predictable for this host.")
+
+	if (errors.some((error) => error.includes("command"))) suggestedFixes.push("Set command to node.")
+	if (errors.some((error) => error.includes("start.js")) || warnings.some((warning) => warning.includes("start.js"))) {
+		suggestedFixes.push("Regenerate the config with balloon_prepare_host_setup_packet or point args to the built start.js path.")
+	}
+	if (containsPlaceholder(cwd) || containsPlaceholder(startArg)) suggestedFixes.push("Replace placeholder paths with your real repo path before testing the host.")
+	if (warnings.some((warning) => warning.includes("--data-dir"))) suggestedFixes.push("Add --data-dir .balloon-mcp-demo or another dedicated data folder.")
+	if (warnings.some((warning) => warning.includes("Absolute cwd"))) suggestedFixes.push("Use an absolute cwd path for Windows host configs outside VS Code.")
+	if (warnings.some((warning) => warning.includes("type: stdio"))) suggestedFixes.push("Add type: stdio for the VS Code servers entry.")
+	return {
+		host,
+		displayName: surface.displayName,
+		configSource,
+		expectedConfigRoot,
+		actualConfigRoot,
+		foundServerEntry,
+		valid: errors.length === 0,
+		command,
+		args,
+		cwd,
+		resolvedCwd: resolvedCwd ? toPortablePath(path.resolve(resolvedCwd)) : null,
+		resolvedStartPath: resolvedStartPath ? toPortablePath(path.resolve(resolvedStartPath)) : null,
+		buildReady,
+		errors,
+		warnings,
+		suggestedFixes,
+	}
+}
+
+const INSTALL_FALLBACK_TOOL_NAMES = ["balloon_prepare_host_setup_packet", "balloon_validate_host_setup"] as const
+const BENCHMARK_SURFACE_TOOL_NAMES = [
+	"balloon_compare_benchmark_lanes",
+	"balloon_score_benchmark_lanes",
+	"balloon_run_long_session_benchmark",
+	"balloon_score_long_session_benchmark",
+	"balloon_describe_slopcode_starter_suite",
+	"balloon_plan_slopcode_starter_benchmark",
+	"balloon_summarize_slopcode_starter_suite",
+	"balloon_export_slopcode_starter_artifacts",
+	"balloon_prepare_slopcode_problem",
+] as const
+const BENCHMARK_SURFACE_RESOURCE_URIS = [
+	"balloon://benchmark/slopcode/starter-suite",
+	"balloon://benchmark/slopcode/starter-suite/runbook",
+] as const
+
+function hasAllNamedTools(definitions: ToolDefinition[], names: readonly string[]): boolean {
+	const knownNames = new Set(definitions.map((definition) => definition.name))
+	return names.every((name) => knownNames.has(name))
+}
+
+function hasAllNamedPrompts(names: string[], requiredNames: string[]): boolean {
+	const knownNames = new Set(names)
+	return requiredNames.every((name) => knownNames.has(name))
+}
+
+function hasAllNamedResources(resources: ResourceDefinition[], uris: readonly string[]): boolean {
+	const knownUris = new Set(resources.map((resource) => resource.uri))
+	return uris.every((uri) => knownUris.has(uri))
+}
+
+function buildInstallDiagnostics(
+	store: BalloonStateStore,
+	options: {
+		host?: unknown
+		repoPath?: unknown
+		configPath?: unknown
+		configJson?: unknown
+		serverName?: unknown
+	},
+): BalloonInstallDiagnostics {
+	const requestedHost = asString(options.host) ? parseHostKind(options.host) : null
+	const hostSurface = requestedHost ? getHostSurface(requestedHost) : null
+	const repoPathInfo = resolveHostRepoPath(asString(options.repoPath))
+	const repoPath = toPortablePath(path.resolve(repoPathInfo.repoPath))
+	const startLayout = resolveHostStartLayout(repoPathInfo.repoPath)
+	const definitions = buildBalloonToolDefinitions()
+	const promptDefinitions = listBalloonPrompts()
+	const promptNames = promptDefinitions.map((prompt) => prompt.name)
+	const resources = listBalloonResources(store)
+	const recommendedFirstTools = hostSurface ? [...hostSurface.recommendedFirstTools] : ["balloon_run_cycle", "balloon_repair_next_turn", "balloon_compare_benchmark_lanes"]
+	const promptSensitiveSurfaces = hostSurface ? [...hostSurface.promptSensitiveSurfaces] : promptNames
+	const promptFallbackReady =
+		hasAllNamedTools(definitions, uniqueStrings([...recommendedFirstTools, ...INSTALL_FALLBACK_TOOL_NAMES])) &&
+		hasAllNamedPrompts(promptNames, promptSensitiveSurfaces)
+	const benchmarkSurfaceReady =
+		hasAllNamedTools(definitions, BENCHMARK_SURFACE_TOOL_NAMES) && hasAllNamedResources(resources, BENCHMARK_SURFACE_RESOURCE_URIS)
+
+	const configPath = asString(options.configPath)
+	const configJson = asString(options.configJson)
+	const serverName = asString(options.serverName)
+	let configCheckMode: BalloonInstallDiagnostics["configCheckMode"] = "none"
+	let hostConfigValidation: BalloonHostSetupValidation | null = null
+	if (requestedHost) {
+		if (configPath || configJson) {
+			configCheckMode = "provided"
+			hostConfigValidation = buildHostSetupValidation({
+				host: requestedHost,
+				configPath,
+				configJson,
+				repoPath: repoPathInfo.repoPath,
+				serverName,
+			})
+		} else {
+			configCheckMode = "generated"
+			const generatedPacket = buildHostSetupPacket({
+				host: requestedHost,
+				repoPath: repoPathInfo.repoPath,
+				serverName,
+			})
+			hostConfigValidation = buildHostSetupValidation({
+				host: requestedHost,
+				configJson: generatedPacket.configSnippet,
+				repoPath: repoPathInfo.repoPath,
+				serverName,
+			})
+		}
+	}
+
+	const warnings: string[] = []
+	if (!startLayout.buildReady) warnings.push("Built Balloon start.js was not found yet. Run npm install and npm run build from the repo root.")
+	if (hostSurface && configCheckMode === "generated") {
+		warnings.push(`No ${hostSurface.displayName} config was provided, so diagnostics only validated a generated setup packet.`)
+	}
+	if (!requestedHost && (configPath || configJson)) {
+		warnings.push("A config file or configJson was provided without host, so only repo-level diagnostics were run.")
+	}
+	if (!promptFallbackReady) warnings.push("Prompt fallback surfaces are incomplete. Rebuild or verify the Balloon MCP tool surface.")
+	if (!benchmarkSurfaceReady) warnings.push("Benchmark surfaces are incomplete. Rebuild or verify the benchmark tool and resource surface.")
+	if (hostSurface && hostSurface.readinessTier !== "recommended_first") {
+		warnings.push(`${hostSurface.displayName} is still marked ${hostSurface.status}. VS Code remains the lowest-friction first host.`)
+	}
+	if (hostConfigValidation) {
+		if (!hostConfigValidation.valid) warnings.push(`Host config validation failed for ${hostConfigValidation.displayName}.`)
+		if (hostConfigValidation.buildReady === false) warnings.push("The resolved host start.js path does not exist yet.")
+		for (const warning of hostConfigValidation.warnings) warnings.push(`Host config: ${warning}`)
+	}
+
+	const recommendedNextSteps: string[] = []
+	if (!startLayout.buildReady) {
+		recommendedNextSteps.push("Run npm install and npm run build from the repo root before attaching Balloon to a host.")
+	}
+	if (!requestedHost) {
+		recommendedNextSteps.push("Choose a host and run balloon_prepare_host_setup_packet for a host-specific MCP config snippet.")
+	} else if (configCheckMode === "generated") {
+		recommendedNextSteps.push(`Paste the generated config into ${hostSurface?.displayName ?? requestedHost}, restart the MCP entry, then rerun balloon_run_install_diagnostics with configPath or configJson.`)
+	}
+	if (hostConfigValidation && hostConfigValidation.suggestedFixes.length > 0) {
+		recommendedNextSteps.push(...hostConfigValidation.suggestedFixes)
+	}
+	if (requestedHost) {
+		recommendedNextSteps.push(`Start with ${recommendedFirstTools.join(", ")} before trying ${promptSensitiveSurfaces.join(", ")}.`)
+	}
+	if (benchmarkSurfaceReady) {
+		recommendedNextSteps.push("Run balloon_compare_benchmark_lanes or balloon_run_long_session_benchmark once the install looks healthy.")
+	} else {
+		recommendedNextSteps.push("Run npm run verify:balloon:mcp to confirm the benchmark surface is built and registered.")
+	}
+
+	const hostReady =
+		hostConfigValidation === null ? true : configCheckMode === "provided" && hostConfigValidation.valid && hostConfigValidation.buildReady === true
+	const overallReady = startLayout.buildReady && promptFallbackReady && benchmarkSurfaceReady && hostReady
+
+	return {
+		host: requestedHost,
+		hostDisplayName: hostSurface?.displayName ?? null,
+		configCheckMode,
+		repoPath,
+		buildReady: startLayout.buildReady,
+		resolvedStartPath: startLayout.resolvedStartPath ? toPortablePath(path.resolve(startLayout.resolvedStartPath)) : null,
+		toolCount: definitions.length,
+		promptCount: promptDefinitions.length,
+		resourceCount: resources.length,
+		recommendedFirstTools,
+		promptSensitiveSurfaces,
+		promptFallbackReady,
+		benchmarkSurfaceReady,
+		hostConfigValidation,
+		overallReady,
+		warnings: uniqueStrings(warnings),
+		recommendedNextSteps: uniqueStrings(recommendedNextSteps),
+	}
+}
+
+function parseHostFlowKind(value: unknown, fallback: BalloonHostFlowKind = "repair_next_turn"): BalloonHostFlowKind {
+	if (typeof value !== "string") return fallback
+	switch (value.trim().toLowerCase()) {
+		case "run_cycle":
+			return "run_cycle"
+		case "review":
+		case "review_session_drift":
+			return "review_session_drift"
+		case "compare":
+		case "compare_benchmark_lanes":
+			return "compare_benchmark_lanes"
+		case "install":
+		case "install_diagnostics":
+			return "install_diagnostics"
+		case "repair":
+		case "repair_next_turn":
+		default:
+			return fallback
+	}
+}
+
+const HOST_VALIDATION_CASE_IDS: BalloonHostValidationCaseId[] = [
+	"install_doctor",
+	"same_chat_tool_repair",
+	"fresh_chat_prompt_repair",
+	"fresh_chat_prompt_review",
+	"same_chat_benchmark_compare",
+]
+
+function parseHostValidationCaseId(value: unknown): BalloonHostValidationCaseId | null {
+	if (typeof value !== "string") return null
+	return HOST_VALIDATION_CASE_IDS.find((caseId) => caseId === value.trim()) ?? null
+}
+
+function parseHostValidationStatus(value: unknown): BalloonHostValidationResultStatus | null {
+	if (typeof value !== "string") return null
+	switch (value.trim().toLowerCase()) {
+		case "pass":
+			return "pass"
+		case "partial":
+			return "partial"
+		case "fail":
+			return "fail"
+		default:
+			return null
+	}
+}
+
+function isPlaceholderText(value: string | null | undefined): boolean {
+	return typeof value === "string" && /REPLACE_WITH_/u.test(value)
+}
+
+function buildHostPromptPacket(
+	store: BalloonStateStore,
+	name: string,
+	args: Record<string, unknown>,
+): BalloonHostPromptPacket | null {
+	const prompt = getBalloonPrompt(store, name, args)
+	if (!prompt) return null
+	return {
+		name,
+		description: prompt.description,
+		messages: prompt.messages.map((message) => ({
+			role: message.role,
+			text: message.content.text,
+		})),
+	}
+}
+
+function buildHostFlowPacket(
+	store: BalloonStateStore,
+	options: {
+		host?: unknown
+		flow?: unknown
+		sessionId?: unknown
+		userRequest?: unknown
+		turns?: unknown
+		repoPath?: unknown
+		configPath?: unknown
+		configJson?: unknown
+		serverName?: unknown
+		hydratePromptPacket?: boolean
+	},
+): BalloonHostFlowPacket {
+	const host = parseHostKind(options.host)
+	const flow = parseHostFlowKind(options.flow)
+	const surface = getHostSurface(host)
+	const sessionId = asString(options.sessionId) ?? "REPLACE_WITH_YOUR_SESSION_ID"
+	const userRequest = asString(options.userRequest) ?? "REPLACE_WITH_YOUR_USER_REQUEST"
+	const repoPath = asString(options.repoPath) ?? "REPLACE_WITH_YOUR_BALLOON_MCP_REPO_PATH"
+	const configPath = asString(options.configPath) ?? "REPLACE_WITH_YOUR_HOST_CONFIG_PATH"
+	const configJson = asString(options.configJson) ?? undefined
+	const serverName = asString(options.serverName) ?? "balloon-mcp"
+	const incomingTurns = asTurns(options.turns)
+	const turns =
+		incomingTurns.length > 0
+			? incomingTurns
+			: [
+					{ role: "system", content: "REPLACE_WITH_PROTECTED_CONTEXT" },
+					{ role: "user", content: userRequest },
+					{ role: "assistant", content: "REPLACE_WITH_DRIFTED_ASSISTANT_REPLY" },
+				]
+
+	let title = ""
+	let summary = ""
+	let preferredSurface: BalloonHostFlowPacket["preferredSurface"] = "tool"
+	let alternateSurface: BalloonHostFlowPacket["alternateSurface"] = "none"
+	let recommendedChatState: BalloonHostFlowPacket["recommendedChatState"] = "same_chat_ok"
+	let exampleRequestPath: string | null = null
+	let toolName: string | null = null
+	let toolArgs: Record<string, unknown> | null = null
+	let promptName: string | null = null
+	let promptArgs: Record<string, unknown> | null = null
+	const instructions: string[] = []
+	const ifHostFeelsFlaky: string[] = []
+	const warnings: string[] = []
+
+	switch (flow) {
+		case "run_cycle":
+			title = "Run Balloon Cycle"
+			summary = "First-pass host flow for building Balloon state, auditing drift, and proving the anti-drift loop is alive."
+			exampleRequestPath = "examples/demo_run_cycle_request.json"
+			toolName = "balloon_run_cycle"
+			toolArgs = { sessionId, turns }
+			instructions.push(
+				`Start with ${toolName} in ${surface.displayName} before testing prompt-heavy flows.`,
+				"Use a short three-turn scenario so the gap report and trickle are easy to inspect.",
+				"Once the cycle looks healthy, move to repair or benchmark comparisons.",
+			)
+			ifHostFeelsFlaky.push(
+				"Use the smallest possible demo session first so tool invocation problems are easy to isolate.",
+				"Run balloon_prepare_host_setup_packet, balloon_validate_host_setup, and balloon_run_install_diagnostics before blaming Balloon logic.",
+			)
+			break
+		case "repair_next_turn":
+			title = "Repair Next Turn"
+			summary = "Reliable repair path for the next reply, with an alternate prompt packet when the host's prompt routing behaves."
+			alternateSurface = "prompt"
+			recommendedChatState = "fresh_chat_preferred"
+			exampleRequestPath = "examples/demo_repair_fallback_request.json"
+			toolName = "balloon_repair_next_turn"
+			toolArgs = { sessionId, userRequest }
+			promptName = "balloon/repair-next-turn"
+			promptArgs = { sessionId, userRequest }
+			instructions.push(
+				`Use ${toolName} first. It is the benchmark-safe repair path in ${surface.displayName}.`,
+				`If the tool result looks right, try ${promptName} only as the alternate host-native surface.`,
+				"Prefer a fresh chat when you test the prompt surface so stale host state does not confuse the result.",
+			)
+			ifHostFeelsFlaky.push(
+				`Stay on ${toolName} for demos, benchmarks, and same-chat recovery.`,
+				"Restart the MCP entry and open a fresh chat before retrying the prompt surface.",
+				"Use balloon_run_install_diagnostics if the host seems healthy but prompts still feel inconsistent.",
+			)
+			break
+		case "review_session_drift":
+			title = "Review Session Drift"
+			summary = "Reliable review path for inspecting why a session drifted, with an alternate prompt packet when the host supports prompt routing well."
+			alternateSurface = "prompt"
+			recommendedChatState = "fresh_chat_preferred"
+			exampleRequestPath = "examples/demo_review_session_drift_request.json"
+			toolName = "balloon_review_session_drift"
+			toolArgs = { sessionId }
+			promptName = "balloon/review-session-drift"
+			promptArgs = { sessionId }
+			instructions.push(
+				`Use ${toolName} first so the drift review does not depend on prompt routing luck.`,
+				"Read the review output before changing anything else in the session.",
+				`If you want the host-native prompt surface later, try ${promptName} from a fresh chat.`,
+			)
+			ifHostFeelsFlaky.push(
+				`Keep ${toolName} as the repeatable path for diagnosis.`,
+				"Do not assume prompt failure means Balloon logic failed; restart and retry from a fresh chat first.",
+				"Use the host playbook and install diagnostics before widening the investigation.",
+			)
+			break
+		case "compare_benchmark_lanes":
+			title = "Compare Benchmark Lanes"
+			summary = "Stable four-lane comparison flow for baseline, deterministic, assist, and staged Balloon without depending on prompt routing."
+			exampleRequestPath = "examples/demo_compare_benchmark_lanes_request.json"
+			toolName = "balloon_compare_benchmark_lanes"
+			toolArgs = { sessionId }
+			instructions.push(
+				`Use ${toolName} after the core repair flow is already working in ${surface.displayName}.`,
+				"Keep the same session state when comparing lanes so the benchmark packet stays interpretable.",
+				"Use this tool rather than ad-hoc prompt experiments when you want repeatable evaluation.",
+			)
+			ifHostFeelsFlaky.push(
+				"Return to balloon_run_cycle and balloon_repair_next_turn first if this comparison feels off.",
+				"Use a fresh chat if the host appears to cache old tool surfaces or stale arguments.",
+			)
+			break
+		case "install_diagnostics":
+			title = "Run Install Diagnostics"
+			summary = "Strict install-doctor pass for checking repo build health, host config resolution, and whether the current host path is ready for strangers."
+			alternateSurface = "resource"
+			exampleRequestPath = "examples/install_diagnostics_request.example.json"
+			toolName = "balloon_run_install_diagnostics"
+			toolArgs = configJson ? { host, repoPath, configJson, serverName } : { host, repoPath, configPath, serverName }
+			instructions.push(
+				`Use ${toolName} before your first real host run and again after editing host config files.`,
+				"Feed it a real configPath when possible so Balloon can resolve start.js and cwd the same way the host does.",
+				`Read balloon://hosts/${host}/playbook after diagnostics if you want the safest next flow for this host.`,
+			)
+			ifHostFeelsFlaky.push(
+				"Regenerate the config with balloon_prepare_host_setup_packet, then validate it again.",
+				"Use balloon_validate_host_setup for focused config debugging and balloon://hosts/matrix for current host tiers.",
+			)
+			break
+	}
+
+	if (promptName && surface.promptSensitiveSurfaces.includes(promptName)) {
+		warnings.push(`${promptName} is still more host-sensitive than the tool path in ${surface.displayName}.`)
+	}
+	if (host !== "vscode" && (flow === "repair_next_turn" || flow === "review_session_drift")) {
+		warnings.push("Prompt routing outside VS Code still needs more repeated real-host validation.")
+	}
+	const hydratePromptPacket = typeof options.hydratePromptPacket === "boolean" ? options.hydratePromptPacket : true
+	const promptPacket =
+		hydratePromptPacket && promptName && promptArgs && !isPlaceholderText(sessionId) ? buildHostPromptPacket(store, promptName, promptArgs) : null
+	if (promptName && !promptPacket && !isPlaceholderText(sessionId)) {
+		warnings.push(`Prompt packet could not be materialized for ${promptName}. Confirm the session exists and Balloon has enough state.`)
+	}
+	if (promptName && isPlaceholderText(sessionId)) {
+		warnings.push("Provide a real sessionId to materialize the prompt packet messages instead of the placeholder shape.")
+	}
+
+	return {
+		host,
+		displayName: surface.displayName,
+		readinessTier: surface.readinessTier,
+		status: surface.status,
+		flow,
+		title,
+		summary,
+		preferredSurface,
+		alternateSurface,
+		recommendedChatState,
+		docsPath: surface.docsPath,
+		exampleRequestPath,
+		toolName,
+		toolArgs,
+		promptName,
+		promptArgs,
+		promptPacket,
+		instructions,
+		ifHostFeelsFlaky,
+		restartHints: [...surface.restartHints],
+		warnings,
+	}
+}
+
+function buildHostPlaybook(store: BalloonStateStore, host: BalloonHostKind): BalloonHostFlowPacket[] {
+	const flows: BalloonHostFlowKind[] = ["install_diagnostics", "run_cycle", "repair_next_turn", "review_session_drift", "compare_benchmark_lanes"]
+	return flows.map((flow) =>
+		buildHostFlowPacket(store, {
+			host,
+			flow,
+			hydratePromptPacket: false,
+		}),
+	)
+}
+
+function buildHostValidationSuite(
+	store: BalloonStateStore,
+	options: {
+		host?: unknown
+		sessionId?: unknown
+		userRequest?: unknown
+		turns?: unknown
+		repoPath?: unknown
+		configPath?: unknown
+		configJson?: unknown
+		serverName?: unknown
+	},
+): BalloonHostValidationSuite {
+	const host = parseHostKind(options.host)
+	const surface = getHostSurface(host)
+	const sharedOptions = {
+		host,
+		sessionId: options.sessionId,
+		userRequest: options.userRequest,
+		turns: options.turns,
+		repoPath: options.repoPath,
+		configPath: options.configPath,
+		configJson: options.configJson,
+		serverName: options.serverName,
+	}
+	const installPacket = buildHostFlowPacket(store, { ...sharedOptions, flow: "install_diagnostics" })
+	const runCyclePacket = buildHostFlowPacket(store, { ...sharedOptions, flow: "run_cycle" })
+	const repairPacket = buildHostFlowPacket(store, { ...sharedOptions, flow: "repair_next_turn" })
+	const reviewPacket = buildHostFlowPacket(store, { ...sharedOptions, flow: "review_session_drift" })
+	const benchmarkPacket = buildHostFlowPacket(store, { ...sharedOptions, flow: "compare_benchmark_lanes" })
+
+	const cases: BalloonHostValidationCase[] = [
+		{
+			caseId: "install_doctor",
+			title: "Install Doctor",
+			goal: "Confirm the repo build and host config resolve cleanly before testing behavior in chat.",
+			chatStateUnderTest: "same_chat_ok",
+			primarySurfaceUnderTest: "tool",
+			prerequisitePackets: [],
+			primaryPacket: installPacket,
+			steps: [
+				"Run the install diagnostics packet first.",
+				"Fix config, cwd, and start.js issues before testing prompt behavior.",
+				"Read the host playbook only after the doctor pass is green or nearly green.",
+			],
+			successSignals: [
+				"Build ready is yes.",
+				"Host config validation is valid when a real config is provided.",
+				"Recommended next steps are short cleanup items, not missing-core-surface failures.",
+			],
+			failureSignals: [
+				"Resolved start.js is missing.",
+				"Config root or server entry is wrong for the host.",
+				"Tool, prompt, or resource counts suggest the MCP surface is incomplete.",
+			],
+		},
+		{
+			caseId: "same_chat_tool_repair",
+			title: "Same-Chat Tool Repair",
+			goal: "Confirm the tool-first repair path works in the same chat after Balloon state is built.",
+			chatStateUnderTest: "same_chat_ok",
+			primarySurfaceUnderTest: "tool",
+			prerequisitePackets: [runCyclePacket],
+			primaryPacket: repairPacket,
+			steps: [
+				"Run the Balloon cycle packet in one chat to seed the session state.",
+				"Without restarting the host, run the repair packet in that same chat.",
+				"Check whether the repaired reply preserves the earlier direction and verification obligations.",
+			],
+			successSignals: [
+				"The repair tool returns a repaired reply and correction summary.",
+				"The repaired reply keeps the bounded task instead of amplifying drift.",
+				"No host restart or fresh chat is needed just to use the tool path.",
+			],
+			failureSignals: [
+				"The tool is missing or stale in the same chat.",
+				"The reply ignores earlier constraints even though the session was already seeded.",
+				"The host appears to keep old arguments or stale MCP tool state.",
+			],
+		},
+		{
+			caseId: "fresh_chat_prompt_repair",
+			title: "Fresh-Chat Prompt Repair",
+			goal: "Check whether the host can invoke the repair prompt cleanly from a fresh chat once the session already exists.",
+			chatStateUnderTest: "fresh_chat_preferred",
+			primarySurfaceUnderTest: "prompt",
+			prerequisitePackets: [runCyclePacket, repairPacket],
+			primaryPacket: repairPacket,
+			steps: [
+				"Seed the session with the same-chat tool path first.",
+				"Open a fresh chat and try the prompt route instead of the tool route.",
+				"Compare the host-native prompt result against the tool repair result for the same session.",
+			],
+			successSignals: [
+				"The host can find balloon/repair-next-turn with the expected args.",
+				"The prompt result preserves the same core constraints as the tool repair path.",
+				"The host does not require extra undocumented nudges to route the prompt correctly.",
+			],
+			failureSignals: [
+				"The prompt is missing, ignored, or routed with stale args.",
+				"The prompt result drifts materially from the tool repair result for the same session.",
+				"The host only behaves after extra verbal steering not captured in docs or playbooks.",
+			],
+		},
+		{
+			caseId: "fresh_chat_prompt_review",
+			title: "Fresh-Chat Prompt Review",
+			goal: "Check whether the review prompt behaves consistently enough to diagnose drift from a fresh chat.",
+			chatStateUnderTest: "fresh_chat_preferred",
+			primarySurfaceUnderTest: "prompt",
+			prerequisitePackets: [runCyclePacket, reviewPacket],
+			primaryPacket: reviewPacket,
+			steps: [
+				"Seed the session first so Balloon has real gaps and trickles to inspect.",
+				"Open a fresh chat and try the review prompt path.",
+				"Compare the host-native prompt result with the tool fallback review packet.",
+			],
+			successSignals: [
+				"The prompt result returns a concrete drift diagnosis.",
+				"The diagnosis still points to the smallest safe next step.",
+				"The prompt path feels equivalent to the tool fallback, not weaker or randomly different.",
+			],
+			failureSignals: [
+				"The prompt route fails or returns generic advice without using the seeded session.",
+				"The host loses the sectioned drift diagnosis shape.",
+				"The prompt path is materially less reliable than the tool fallback in a fresh chat.",
+			],
+		},
+		{
+			caseId: "same_chat_benchmark_compare",
+			title: "Same-Chat Benchmark Compare",
+			goal: "Confirm the four-lane comparison surface stays stable after the host has already used other Balloon tools in the same chat.",
+			chatStateUnderTest: "same_chat_ok",
+			primarySurfaceUnderTest: "tool",
+			prerequisitePackets: [runCyclePacket, repairPacket],
+			primaryPacket: benchmarkPacket,
+			steps: [
+				"Keep the same chat open after the repair path succeeds.",
+				"Run the four-lane comparison packet without resetting the host.",
+				"Check whether all lanes return and whether the packet still feels benchmark-safe.",
+			],
+			successSignals: [
+				"Baseline, deterministic, assist, and staged lanes are all present.",
+				"The host does not lose tool visibility after earlier Balloon calls.",
+				"The comparison packet remains legible and repeatable in the same chat.",
+			],
+			failureSignals: [
+				"The host drops tools or returns stale tool surfaces mid-session.",
+				"Later Balloon calls require a restart even though the setup was healthy.",
+				"The benchmark comparison packet is incomplete or obviously stale.",
+			],
+		},
+	]
+
+	const warnings: string[] = []
+	if (host !== "vscode") warnings.push(`${surface.displayName} still needs more repeated real-host validation than the VS Code-first path.`)
+	if (cases.some((validationCase) => validationCase.primaryPacket.promptPacket === null && validationCase.primaryPacket.promptName !== null)) {
+		warnings.push("Some prompt packets are still placeholder-only. Provide a real sessionId to materialize prompt messages.")
+	}
+	if (surface.readinessTier !== "recommended_first") warnings.push("Treat prompt-path validation as secondary to the tool-first validation cases for this host.")
+
+	return {
+		host,
+		displayName: surface.displayName,
+		readinessTier: surface.readinessTier,
+		status: surface.status,
+		docsPath: surface.docsPath,
+		validationDocPath: "docs/HOST_VALIDATION.md",
+		summary: "Built-in validation suite for install, same-chat tool flows, and fresh-chat prompt checks across the current Balloon host surface.",
+		recommendedOrder: cases.map((validationCase) => validationCase.caseId),
+		cases,
+		warnings: uniqueStrings(warnings),
+	}
+}
+
+function buildHostValidationEvidenceSummary(store: BalloonStateStore, host: BalloonHostKind): BalloonHostValidationEvidenceSummary {
+	const surface = getHostSurface(host)
+	const suite = buildHostValidationSuite(store, { host })
+	const recentRuns = store.listHostValidationEvidence(host, 25)
+	const rollups: BalloonHostValidationCaseEvidenceRollup[] = suite.cases.map((validationCase) => {
+		const caseRuns = recentRuns.filter((run) => run.caseId === validationCase.caseId)
+		const latest = caseRuns[0] ?? null
+		return {
+			caseId: validationCase.caseId,
+			title: validationCase.title,
+			latestStatus: latest?.status ?? "not_run",
+			latestSummary: latest?.summary ?? null,
+			totalRuns: caseRuns.length,
+			passCount: caseRuns.filter((run) => run.status === "pass").length,
+			partialCount: caseRuns.filter((run) => run.status === "partial").length,
+			failCount: caseRuns.filter((run) => run.status === "fail").length,
+			lastRecordedAt: latest?.recordedAt ?? null,
+		}
+	})
+	const totalRuns = recentRuns.length
+	const passCount = recentRuns.filter((run) => run.status === "pass").length
+	const partialCount = recentRuns.filter((run) => run.status === "partial").length
+	const failCount = recentRuns.filter((run) => run.status === "fail").length
+	const completedCases = rollups.filter((rollup) => rollup.latestStatus !== "not_run").length
+	const openRisks: string[] = []
+	for (const rollup of rollups) {
+		if (rollup.latestStatus === "fail") openRisks.push(`${rollup.title} is currently failing in ${surface.displayName}.`)
+		else if (rollup.latestStatus === "partial") openRisks.push(`${rollup.title} is only partially working in ${surface.displayName}.`)
+		else if (rollup.latestStatus === "not_run") openRisks.push(`${rollup.title} has no recorded validation evidence yet.`)
+	}
+	if (surface.readinessTier !== "recommended_first") {
+		openRisks.push(`${surface.displayName} still sits below the VS Code-first path in readiness tier.`)
+	}
+	return {
+		host,
+		displayName: surface.displayName,
+		readinessTier: surface.readinessTier,
+		status: surface.status,
+		totalRuns,
+		passCount,
+		partialCount,
+		failCount,
+		latestRecordedAt: recentRuns[0]?.recordedAt ?? null,
+		coverage: {
+			completedCases,
+			totalCases: rollups.length,
+		},
+		cases: rollups,
+		recentRuns,
+		openRisks: uniqueStrings(openRisks),
+	}
+}
+
+function formatHostSurface(surface: BalloonHostSurface): string {
+	return [
+		`Host: ${surface.displayName}`,
+		`Key: ${surface.host}`,
+		`Tier: ${surface.readinessTier}`,
+		`Status: ${surface.status}`,
+		`Config root: ${surface.configRoot}`,
+		`Example config: ${surface.exampleConfigPath}`,
+		`Docs: ${surface.docsPath}`,
+		`Recommended first tools: ${surface.recommendedFirstTools.join(", ")}`,
+		`Prompt-sensitive surfaces: ${surface.promptSensitiveSurfaces.join(", ")}`,
+		"Restart hints",
+		...surface.restartHints.map((hint, index) => `${index + 1}. ${hint}`),
+		"Known caveats",
+		...surface.knownCaveats.map((caveat, index) => `${index + 1}. ${caveat}`),
+		"Notes",
+		...surface.notes.map((note, index) => `${index + 1}. ${note}`),
+	].join("\n")
+}
+
+function formatHostSurfaceMatrix(surfaces: BalloonHostSurface[]): string {
+	return [
+		"Balloon host matrix",
+		"",
+		...surfaces.flatMap((surface, index) => [
+			`${index + 1}. ${surface.displayName}`,
+			`Key: ${surface.host}`,
+			`Tier: ${surface.readinessTier}`,
+			`Status: ${surface.status}`,
+			`Config root: ${surface.configRoot}`,
+			`Recommended first tools: ${surface.recommendedFirstTools.join(", ")}`,
+			`Docs: ${surface.docsPath}`,
+			"",
+		]),
+	].join("\n")
+}
+
+function formatHostSetupPacket(packet: BalloonHostSetupPacket): string {
+	return [
+		`Host: ${packet.displayName}`,
+		`Status: ${packet.status}`,
+		`Tier: ${packet.readinessTier}`,
+		`Config root: ${packet.configRoot}`,
+		`Repo path: ${packet.repoPath}`,
+		`Command: ${packet.command}`,
+		`Args: ${packet.args.join(" ")}`,
+		`cwd: ${packet.cwd}`,
+		`Data dir: ${packet.dataDir}`,
+		`Resolved start.js: ${packet.resolvedStartPath ?? "not found yet"}`,
+		`Build ready: ${packet.buildReady ? "yes" : "no"}`,
+		`Example config: ${packet.exampleConfigPath}`,
+		`Docs: ${packet.docsPath}`,
+		"",
+		"Recommended first tools",
+		...packet.recommendedFirstTools.map((tool, index) => `${index + 1}. ${tool}`),
+		"Prompt-sensitive surfaces",
+		...packet.promptSensitiveSurfaces.map((surface, index) => `${index + 1}. ${surface}`),
+		"Restart hints",
+		...packet.restartHints.map((hint, index) => `${index + 1}. ${hint}`),
+		...(packet.validationWarnings.length > 0 ? ["Validation warnings", ...packet.validationWarnings.map((warning, index) => `${index + 1}. ${warning}`)] : ["Validation warnings", "None."]),
+		"First-run checklist",
+		...packet.firstRunChecklist.map((item, index) => `${index + 1}. ${item}`),
+		"",
+		"Config snippet",
+		"```json",
+		packet.configSnippet,
+		"```",
+	].join("\n")
+}
+
+function formatHostSetupValidation(result: BalloonHostSetupValidation): string {
+	return [
+		`Host: ${result.displayName}`,
+		`Config source: ${result.configSource}`,
+		`Expected config root: ${result.expectedConfigRoot}`,
+		`Actual config root: ${result.actualConfigRoot}`,
+		`Server entry found: ${result.foundServerEntry ? "yes" : "no"}`,
+		`Valid: ${result.valid ? "yes" : "no"}`,
+		`Command: ${result.command ?? "missing"}`,
+		`Args: ${result.args.length > 0 ? result.args.join(" ") : "missing"}`,
+		`cwd: ${result.cwd ?? "missing"}`,
+		`Resolved cwd: ${result.resolvedCwd ?? "not resolved"}`,
+		`Resolved start.js: ${result.resolvedStartPath ?? "not resolved"}`,
+		`Build ready: ${result.buildReady === null ? "unknown" : result.buildReady ? "yes" : "no"}`,
+		...(result.errors.length > 0 ? ["Errors", ...result.errors.map((error, index) => `${index + 1}. ${error}`)] : ["Errors", "None."]),
+		...(result.warnings.length > 0 ? ["Warnings", ...result.warnings.map((warning, index) => `${index + 1}. ${warning}`)] : ["Warnings", "None."]),
+		...(result.suggestedFixes.length > 0 ? ["Suggested fixes", ...result.suggestedFixes.map((fix, index) => `${index + 1}. ${fix}`)] : []),
+	].join("\n")
+}
+
+function formatInstallDiagnostics(result: BalloonInstallDiagnostics): string {
+	const configCheckLabel =
+		result.configCheckMode === "provided" ? "provided host config" : result.configCheckMode === "generated" ? "generated host packet" : "repo-only"
+	return [
+		"Balloon install diagnostics",
+		`Host: ${result.hostDisplayName ?? "repo-only diagnostics"}`,
+		`Config check mode: ${configCheckLabel}`,
+		`Repo path: ${result.repoPath}`,
+		`Resolved start.js: ${result.resolvedStartPath ?? "not found yet"}`,
+		`Build ready: ${result.buildReady ? "yes" : "no"}`,
+		`Tool count: ${result.toolCount}`,
+		`Prompt count: ${result.promptCount}`,
+		`Resource count: ${result.resourceCount}`,
+		`Prompt fallback ready: ${result.promptFallbackReady ? "yes" : "no"}`,
+		`Benchmark surface ready: ${result.benchmarkSurfaceReady ? "yes" : "no"}`,
+		`Overall ready: ${result.overallReady ? "yes" : "no"}`,
+		"Recommended first tools",
+		...(result.recommendedFirstTools.length > 0 ? result.recommendedFirstTools.map((tool, index) => `${index + 1}. ${tool}`) : ["None."]),
+		"Prompt-sensitive surfaces",
+		...(result.promptSensitiveSurfaces.length > 0 ? result.promptSensitiveSurfaces.map((surface, index) => `${index + 1}. ${surface}`) : ["None."]),
+		...(result.warnings.length > 0 ? ["Warnings", ...result.warnings.map((warning, index) => `${index + 1}. ${warning}`)] : ["Warnings", "None."]),
+		...(result.recommendedNextSteps.length > 0
+			? ["Recommended next steps", ...result.recommendedNextSteps.map((step, index) => `${index + 1}. ${step}`)]
+			: ["Recommended next steps", "None."]),
+		...(result.hostConfigValidation ? ["Host config validation", formatHostSetupValidation(result.hostConfigValidation)] : []),
+	].join("\n")
+}
+
+function formatHostFlowPacket(packet: BalloonHostFlowPacket): string {
+	return [
+		`Host: ${packet.displayName}`,
+		`Flow: ${packet.title}`,
+		`Summary: ${packet.summary}`,
+		`Tier: ${packet.readinessTier}`,
+		`Status: ${packet.status}`,
+		`Preferred surface: ${packet.preferredSurface}`,
+		`Alternate surface: ${packet.alternateSurface}`,
+		`Recommended chat state: ${packet.recommendedChatState === "fresh_chat_preferred" ? "fresh chat preferred" : "same chat ok"}`,
+		`Docs: ${packet.docsPath}`,
+		`Example request: ${packet.exampleRequestPath ?? "none"}`,
+		`Tool: ${packet.toolName ?? "none"}`,
+		...(packet.toolArgs ? ["Tool args", "```json", JSON.stringify(packet.toolArgs, null, 2), "```"] : []),
+		`Prompt: ${packet.promptName ?? "none"}`,
+		...(packet.promptArgs ? ["Prompt args", "```json", JSON.stringify(packet.promptArgs, null, 2), "```"] : []),
+		...(packet.promptPacket
+			? [
+					"Prompt packet",
+					`Description: ${packet.promptPacket.description}`,
+					...packet.promptPacket.messages.flatMap((message, index) => [`${index + 1}. ${message.role}`, message.text]),
+				]
+			: []),
+		"Instructions",
+		...packet.instructions.map((instruction, index) => `${index + 1}. ${instruction}`),
+		"If host feels flaky",
+		...packet.ifHostFeelsFlaky.map((instruction, index) => `${index + 1}. ${instruction}`),
+		"Restart hints",
+		...packet.restartHints.map((hint, index) => `${index + 1}. ${hint}`),
+		...(packet.warnings.length > 0 ? ["Warnings", ...packet.warnings.map((warning, index) => `${index + 1}. ${warning}`)] : ["Warnings", "None."]),
+	].join("\n")
+}
+
+function formatHostValidationSuite(suite: BalloonHostValidationSuite): string {
+	return [
+		`Host: ${suite.displayName}`,
+		`Tier: ${suite.readinessTier}`,
+		`Status: ${suite.status}`,
+		`Docs: ${suite.docsPath}`,
+		`Validation doc: ${suite.validationDocPath}`,
+		`Summary: ${suite.summary}`,
+		"Recommended order",
+		...suite.recommendedOrder.map((caseId, index) => `${index + 1}. ${caseId}`),
+		...(suite.warnings.length > 0 ? ["Warnings", ...suite.warnings.map((warning, index) => `${index + 1}. ${warning}`)] : ["Warnings", "None."]),
+		...suite.cases.flatMap((validationCase, index) => [
+			"",
+			`${index + 1}. ${validationCase.title}`,
+			`Case id: ${validationCase.caseId}`,
+			`Goal: ${validationCase.goal}`,
+			`Chat state under test: ${validationCase.chatStateUnderTest === "fresh_chat_preferred" ? "fresh chat preferred" : "same chat ok"}`,
+			`Primary surface: ${validationCase.primarySurfaceUnderTest}`,
+			`Primary flow: ${validationCase.primaryPacket.flow}`,
+			...(validationCase.prerequisitePackets.length > 0
+				? [`Prerequisite flows: ${validationCase.prerequisitePackets.map((packet) => packet.flow).join(", ")}`]
+				: ["Prerequisite flows: none"]),
+			"Steps",
+			...validationCase.steps.map((step, stepIndex) => `${stepIndex + 1}. ${step}`),
+			"Success signals",
+			...validationCase.successSignals.map((signal, signalIndex) => `${signalIndex + 1}. ${signal}`),
+			"Failure signals",
+			...validationCase.failureSignals.map((signal, signalIndex) => `${signalIndex + 1}. ${signal}`),
+		]),
+	].join("\n")
+}
+
+function formatHostValidationEvidence(evidence: BalloonHostValidationEvidence): string {
+	return [
+		`Host: ${evidence.host}`,
+		`Case id: ${evidence.caseId}`,
+		`Status: ${evidence.status}`,
+		`Chat state under test: ${evidence.chatStateUnderTest === "fresh_chat_preferred" ? "fresh chat preferred" : "same chat ok"}`,
+		`Session: ${evidence.sessionId ?? "none"}`,
+		`Host version: ${evidence.hostVersion ?? "unknown"}`,
+		`Recorded at: ${evidence.recordedAt}`,
+		`Summary: ${evidence.summary}`,
+		...(evidence.findings.length > 0 ? ["Findings", ...evidence.findings.map((finding, index) => `${index + 1}. ${finding}`)] : ["Findings", "None."]),
+		...(evidence.suggestedFixes.length > 0
+			? ["Suggested fixes", ...evidence.suggestedFixes.map((fix, index) => `${index + 1}. ${fix}`)]
+			: ["Suggested fixes", "None."]),
+	].join("\n")
+}
+
+function formatHostValidationEvidenceSummary(summary: BalloonHostValidationEvidenceSummary): string {
+	return [
+		`Host: ${summary.displayName}`,
+		`Tier: ${summary.readinessTier}`,
+		`Status: ${summary.status}`,
+		`Total recorded runs: ${summary.totalRuns}`,
+		`Coverage: ${summary.coverage.completedCases}/${summary.coverage.totalCases} validation cases`,
+		`Passes: ${summary.passCount}`,
+		`Partials: ${summary.partialCount}`,
+		`Fails: ${summary.failCount}`,
+		`Latest recorded at: ${summary.latestRecordedAt ?? "none"}`,
+		"Case rollups",
+		...summary.cases.flatMap((rollup, index) => [
+			`${index + 1}. ${rollup.title}`,
+			`Case id: ${rollup.caseId}`,
+			`Latest status: ${rollup.latestStatus}`,
+			`Latest summary: ${rollup.latestSummary ?? "none"}`,
+			`Run counts: ${rollup.totalRuns} total | ${rollup.passCount} pass | ${rollup.partialCount} partial | ${rollup.failCount} fail`,
+			`Last recorded at: ${rollup.lastRecordedAt ?? "none"}`,
+		]),
+		...(summary.openRisks.length > 0 ? ["Open risks", ...summary.openRisks.map((risk, index) => `${index + 1}. ${risk}`)] : ["Open risks", "None."]),
 	].join("\n")
 }
 
@@ -1068,17 +2759,40 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 				const hiddenRequirements = detectHiddenRequirements(latestUserRequest, latestResponse).filter((requirement) => !requirement.coveredByResponse)
 				const gaps = auditLatestTurn(sessionId, profile, latestResponse, latestUserRequest)
 				context.store.saveGaps(sessionId, gaps)
+				const driftPressure = buildDriftPressure(sessionId, profile, latestResponse, latestUserRequest, gaps, hiddenRequirements)
+				const persistentBias = buildPersistentDriftBias({
+					sessionId,
+					profile,
+					gaps,
+					recentGaps: context.store.getRecentGaps(sessionId, 12),
+					hiddenRequirements,
+					driftPressure,
+					pressureHistory: buildDriftPressureHistorySummary(context.store, sessionId),
+				})
 
 				const retrievalLimit = asPositiveInt(args.retrievalLimit, 4)
-				const retrievalQueries = [...gaps.flatMap((gap) => [gap.title, gap.description, ...gap.suggestedQueries]), ...hiddenRequirements.map((requirement) => requirement.requirement)]
-				const hits = retrieveRelevantTurns(storedTurns, retrievalQueries, retrievalLimit)
-				const trickle = buildProxyTrickle(sessionId, gaps, hits)
+				const retrievalQueries = [
+					...gaps.flatMap((gap) => [gap.title, gap.description, ...gap.suggestedQueries]),
+					...hiddenRequirements.map((requirement) => requirement.requirement),
+					...persistentBias.queryBoosts,
+				]
+				const hits = retrieveRelevantTurns(storedTurns, retrievalQueries, retrievalLimit, { bias: persistentBias })
+				const trickle = buildProxyTrickle(sessionId, gaps, hits, persistentBias)
 				context.store.saveTrickle(trickle)
 
 				const autoReinforceMemory = typeof args.autoReinforceMemory === "boolean" ? args.autoReinforceMemory : true
 				const reason = asString(args.reason) ?? "balloon_run_cycle auto reinforcement"
 				const memoryUpdates = autoReinforceMemory ? context.store.reinforceMemory(sessionId, trickle.priorityInstructions, reason) : []
-				const nextTurnStance = buildNextTurnStance(profile, hiddenRequirements, trickle)
+				const nextTurnStance = buildNextTurnStance(profile, hiddenRequirements, driftPressure, trickle, persistentBias)
+				const pressureSnapshot = persistDriftPressureSnapshot(context.store, {
+					sessionId,
+					source: "run_cycle",
+					turnCount: storedTurns.length,
+					requestText: latestUserRequest,
+					latestResponse,
+					pressure: driftPressure,
+				})
+				const pressureHistory = buildDriftPressureHistorySummary(context.store, sessionId)
 
 				const textSections = [
 					"Balloon cycle complete.",
@@ -1091,6 +2805,15 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					"",
 					"Gap report",
 					formatGaps(gaps),
+					"",
+					"Drift pressure",
+					formatDriftPressure(driftPressure),
+					"",
+					"Persistent drift focus",
+					formatPersistentBias(persistentBias),
+					"",
+					"Pressure history",
+					formatDriftPressureHistory(pressureHistory),
 					"",
 					"Retrieval anchors",
 					formatRetrievalHits(hits),
@@ -1111,6 +2834,10 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					hiddenRequirements,
 					gapCount: gaps.length,
 					gaps,
+					driftPressure,
+					persistentBias,
+					pressureSnapshot,
+					pressureHistory,
 					hits,
 					trickle,
 					nextTurnStance,
@@ -1180,8 +2907,27 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 				const profile = context.store.getProfile(sessionId)
 				if (!profile) return toolError(`No profile found for session ${sessionId}. Run balloon_build_profile first.`)
 				const gaps = auditLatestTurn(sessionId, profile, latestResponse, latestUserRequest)
+				const hiddenRequirements = latestUserRequest ? detectHiddenRequirements(latestUserRequest, latestResponse).filter((requirement) => !requirement.coveredByResponse) : []
+				const driftPressure = buildDriftPressure(sessionId, profile, latestResponse, latestUserRequest, gaps, hiddenRequirements)
 				context.store.saveGaps(sessionId, gaps)
-				return textResult(formatGaps(gaps), { sessionId, gapCount: gaps.length, gaps })
+				const turnCount = context.store.getTurns(sessionId, 5000).length
+				const pressureSnapshot = persistDriftPressureSnapshot(context.store, {
+					sessionId,
+					source: "audit_turn",
+					turnCount,
+					requestText: latestUserRequest,
+					latestResponse,
+					pressure: driftPressure,
+				})
+				const pressureHistory = buildDriftPressureHistorySummary(context.store, sessionId)
+				return textResult([formatGaps(gaps), "", "Drift pressure", formatDriftPressure(driftPressure), "", "Pressure history", formatDriftPressureHistory(pressureHistory)].join("\n"), {
+					sessionId,
+					gapCount: gaps.length,
+					gaps,
+					driftPressure,
+					pressureSnapshot,
+					pressureHistory,
+				})
 			},
 		},
 		{
@@ -1295,6 +3041,15 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					semanticMaxNotes: args.semanticMaxNotes,
 				})
 				if (!bundle) return toolError(`Could not build a repair packet for session ${sessionId}. A user request and prior Balloon session state are required.`)
+				const pressureSnapshot = persistDriftPressureSnapshot(context.store, {
+					sessionId,
+					source: "repair_packet",
+					turnCount: bundle.profile.sourceTurnCount,
+					requestText: bundle.requestText,
+					latestResponse: bundle.latestResponse,
+					pressure: bundle.driftPressure,
+				})
+				const pressureHistory = buildDriftPressureHistorySummary(context.store, sessionId)
 				const text = [
 					"Balloon repair packet ready.",
 					"",
@@ -1303,6 +3058,15 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					"",
 					"What Balloon corrected",
 					bundle.correctionSummary,
+					"",
+					"Drift pressure",
+					formatDriftPressure(bundle.driftPressure),
+					"",
+					"Persistent drift focus",
+					formatPersistentBias(bundle.persistentBias),
+					"",
+					"Pressure history",
+					formatDriftPressureHistory(pressureHistory),
 					"",
 					"Semantic CARA",
 					formatSemanticCara(bundle.semanticCara),
@@ -1316,6 +3080,10 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					profile: bundle.profile,
 					hiddenRequirements: bundle.hiddenRequirements,
 					gaps: bundle.gaps,
+					driftPressure: bundle.driftPressure,
+					persistentBias: bundle.persistentBias,
+					pressureSnapshot,
+					pressureHistory,
 					trickle: bundle.trickle,
 					releasePacket: bundle.releasePacket,
 					nextTurnStance: bundle.nextTurnStance,
@@ -1368,9 +3136,21 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					"Effective repaired reply",
 					bundle.repairedReply,
 					"",
+					"Drift pressure",
+					formatDriftPressure(bundle.driftPressure),
+					"",
 					"Semantic CARA",
 					formatSemanticCara(bundle.semanticCara),
 				].join("\n")
+				const pressureSnapshot = persistDriftPressureSnapshot(context.store, {
+					sessionId,
+					source: "repair_packet",
+					turnCount: bundle.profile.sourceTurnCount,
+					requestText: bundle.requestText,
+					latestResponse: bundle.latestResponse,
+					pressure: bundle.driftPressure,
+				})
+				const pressureHistory = buildDriftPressureHistorySummary(context.store, sessionId)
 				return textResult(text, {
 					sessionId,
 					requestText: bundle.requestText,
@@ -1378,6 +3158,9 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					profile: bundle.profile,
 					gaps: bundle.gaps,
 					hiddenRequirements: bundle.hiddenRequirements,
+					driftPressure: bundle.driftPressure,
+					pressureSnapshot,
+					pressureHistory,
 					releasePacket: bundle.releasePacket,
 					nextTurnStance: bundle.nextTurnStance,
 					deterministicReply: bundle.deterministicReply,
@@ -1425,6 +3208,15 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					semanticMaxNotes: args.semanticMaxNotes,
 				})
 				if (!hybrid) return toolError(`Could not build a hybrid repair packet for session ${sessionId}.`)
+				const pressureSnapshot = persistDriftPressureSnapshot(context.store, {
+					sessionId,
+					source: "repair_packet",
+					turnCount: hybrid.profile.sourceTurnCount,
+					requestText: hybrid.requestText,
+					latestResponse: hybrid.latestResponse,
+					pressure: hybrid.driftPressure,
+				})
+				const pressureHistory = buildDriftPressureHistorySummary(context.store, sessionId)
 				const replyChanged = deterministic.repairedReply.trim() !== hybrid.repairedReply.trim()
 				const semanticSignalChanged =
 					hybrid.semanticCara.notes.length > 0 ||
@@ -1446,6 +3238,12 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					"Hybrid repaired reply",
 					hybrid.repairedReply,
 					"",
+					"Drift pressure",
+					formatDriftPressure(hybrid.driftPressure),
+					"",
+					"Pressure history",
+					formatDriftPressureHistory(pressureHistory),
+					"",
 					"Semantic CARA",
 					formatSemanticCara(hybrid.semanticCara),
 					"",
@@ -1461,6 +3259,9 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					profile: hybrid.profile,
 					gaps: hybrid.gaps,
 					hiddenRequirements: hybrid.hiddenRequirements,
+					driftPressure: hybrid.driftPressure,
+					pressureSnapshot,
+					pressureHistory,
 					releasePacket: hybrid.releasePacket,
 					nextTurnStance: hybrid.nextTurnStance,
 					deterministicReply: deterministic.repairedReply,
@@ -1531,6 +3332,15 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					forceStageCount: args.forceStageCount,
 				})
 				if (!staged) return toolError(`Could not build a staged Balloon cycle for session ${sessionId}.`)
+				const pressureSnapshot = persistDriftPressureSnapshot(context.store, {
+					sessionId,
+					source: "staged_cycle",
+					turnCount: staged.turnCount,
+					requestText: asString(args.userRequest) ?? null,
+					latestResponse: asString(args.latestResponse) ?? null,
+					pressure: staged.driftPressure,
+				})
+				const pressureHistory = buildDriftPressureHistorySummary(context.store, sessionId)
 				const text = ["Balloon staged cycle complete.", "", formatStagedResult(staged)].join("\n")
 				return textResult(text, {
 					sessionId,
@@ -1538,6 +3348,9 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					thresholds: staged.thresholds,
 					forcedStageCount: staged.forcedStageCount,
 					activeStageCount: staged.activeStageCount,
+					driftPressure: staged.driftPressure,
+					pressureSnapshot,
+					pressureHistory,
 					stages: staged.stages,
 					releasePacket: staged.releasePacket,
 					deterministicReply: staged.deterministicReply,
@@ -1667,6 +3480,11 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					},
 					mergeMode: { type: "string", enum: ["replace", "append"], description: "Whether provided turns replace or append." },
 					checkpoints: { type: "array", description: "Optional checkpoint turn counts. Defaults to 10, 25, 50.", items: { type: "number" } },
+					checkpointMode: {
+						type: "string",
+						enum: ["turn_count", "assistant_checkpoint"],
+						description: "Interpret checkpoints as raw turn counts or as assistant-turn ordinals.",
+					},
 					semanticAdapterPath: { type: "string", description: "Optional semantic adapter path for the assist lane." },
 					semanticTimeoutMs: { type: "number", description: "Optional semantic adapter timeout in milliseconds." },
 					semanticMaxNotes: { type: "number", description: "Optional cap on semantic notes returned." },
@@ -1681,6 +3499,7 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					turns: asTurns(args.turns),
 					mergeMode: asString(args.mergeMode),
 					checkpoints: args.checkpoints,
+					checkpointMode: args.checkpointMode,
 					semanticAdapterPath: args.semanticAdapterPath,
 					semanticTimeoutMs: args.semanticTimeoutMs,
 					semanticMaxNotes: args.semanticMaxNotes,
@@ -1698,6 +3517,11 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					`Base session: ${sessionId}`,
 					`Total turns: ${benchmark.totalTurnCount}`,
 					`Requested checkpoints: ${benchmark.requestedCheckpoints.join(", ")}`,
+					`Checkpoint mode: ${benchmark.checkpointMode}`,
+					"",
+					"Pressure history",
+					formatDriftPressureHistory(benchmark.pressureHistory),
+					"",
 					`Executed checkpoints: ${benchmark.executedCheckpoints.map((entry) => entry.actualTurnCount).join(", ")}`,
 					`Assist changed deterministic at checkpoints: ${assistChangedCount}/${benchmark.executedCheckpoints.length}`,
 					`Staged changed deterministic at checkpoints: ${stagedChangedCount}/${benchmark.executedCheckpoints.length}`,
@@ -1708,7 +3532,9 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					sessionId: benchmark.sessionId,
 					totalTurnCount: benchmark.totalTurnCount,
 					requestedCheckpoints: benchmark.requestedCheckpoints,
+					checkpointMode: benchmark.checkpointMode,
 					executedCheckpoints: benchmark.executedCheckpoints,
+					pressureHistory: benchmark.pressureHistory,
 					forceStageCount: benchmark.forceStageCount,
 				})
 			},
@@ -1738,6 +3564,11 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					},
 					mergeMode: { type: "string", enum: ["replace", "append"], description: "Whether provided turns replace or append." },
 					checkpoints: { type: "array", description: "Optional checkpoint turn counts. Defaults to 10, 25, 50.", items: { type: "number" } },
+					checkpointMode: {
+						type: "string",
+						enum: ["turn_count", "assistant_checkpoint"],
+						description: "Interpret checkpoints as raw turn counts or as assistant-turn ordinals.",
+					},
 					semanticAdapterPath: { type: "string", description: "Optional semantic adapter path for the assist lane." },
 					semanticTimeoutMs: { type: "number", description: "Optional semantic adapter timeout in milliseconds." },
 					semanticMaxNotes: { type: "number", description: "Optional cap on semantic notes returned." },
@@ -1752,6 +3583,7 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					turns: asTurns(args.turns),
 					mergeMode: asString(args.mergeMode),
 					checkpoints: args.checkpoints,
+					checkpointMode: args.checkpointMode,
 					semanticAdapterPath: args.semanticAdapterPath,
 					semanticTimeoutMs: args.semanticTimeoutMs,
 					semanticMaxNotes: args.semanticMaxNotes,
@@ -1760,6 +3592,298 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 				})
 				if (!result) return toolError(`Could not build the long-session score summary for ${sessionId}.`)
 				return textResult(formatLongSessionBenchmarkScoreResult(result), result as unknown as JsonRecord)
+			},
+		},
+		{
+			name: "balloon_prepare_host_setup_packet",
+			title: "Prepare Host Setup Packet",
+			description: "Builds a host-specific Balloon MCP config packet with the right command, args, restart hints, and tool-first fallback guidance.",
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				properties: {
+					host: {
+						type: "string",
+						enum: ["vscode", "cline", "roo_code", "claude_desktop", "generic_json"],
+						description: "Target MCP host or host family.",
+					},
+					repoPath: { type: "string", description: "Optional local Balloon repo path. Defaults to the server process cwd." },
+					dataDir: { type: "string", description: "Optional Balloon data directory passed to --data-dir." },
+					serverName: { type: "string", description: "Optional MCP server entry name. Defaults to balloon-mcp." },
+					preferWorkspaceVariable: {
+						type: "boolean",
+						description: "For VS Code, whether to prefer ${workspaceFolder} instead of an absolute cwd when repoPath is not explicit.",
+					},
+					semanticCaraMode: {
+						type: "string",
+						enum: ["off", "shadow", "assist"],
+						description: "Optional semantic CARA mode for the generated startup args.",
+					},
+					semanticCaraAdapter: { type: "string", description: "Optional semantic adapter path for assist mode." },
+					semanticCaraTimeoutMs: { type: "number", description: "Optional semantic adapter timeout in milliseconds." },
+					semanticCaraMaxNotes: { type: "number", description: "Optional semantic max notes cap." },
+				},
+			},
+			run: (args) => {
+				const packet = buildHostSetupPacket({
+					host: args.host,
+					repoPath: args.repoPath,
+					dataDir: args.dataDir,
+					serverName: args.serverName,
+					preferWorkspaceVariable: args.preferWorkspaceVariable,
+					semanticCaraMode: args.semanticCaraMode,
+					semanticCaraAdapter: args.semanticCaraAdapter,
+					semanticCaraTimeoutMs: args.semanticCaraTimeoutMs,
+					semanticCaraMaxNotes: args.semanticCaraMaxNotes,
+				})
+				return textResult(formatHostSetupPacket(packet), packet as unknown as JsonRecord)
+			},
+		},
+		{
+			name: "balloon_validate_host_setup",
+			title: "Validate Host Setup",
+			description: "Validates a Balloon MCP host config file or inline JSON snippet and explains the safest fixes when paths or config roots are off.",
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				properties: {
+					host: {
+						type: "string",
+						enum: ["vscode", "cline", "roo_code", "claude_desktop", "generic_json"],
+						description: "Target MCP host or host family.",
+					},
+					configPath: { type: "string", description: "Optional path to a host config file to validate." },
+					configJson: { type: "string", description: "Optional inline JSON config snippet to validate." },
+					repoPath: { type: "string", description: "Optional local Balloon repo path used to resolve ${workspaceFolder} or cwd-relative paths." },
+					serverName: { type: "string", description: "Optional MCP server entry name. Defaults to balloon-mcp." },
+				},
+			},
+			run: (args) => {
+				const result = buildHostSetupValidation({
+					host: args.host,
+					configPath: args.configPath,
+					configJson: args.configJson,
+					repoPath: args.repoPath,
+					serverName: args.serverName,
+				})
+				const formatter = formatHostSetupValidation(result)
+				if (!result.valid) return toolError(formatter, result as unknown as JsonRecord)
+				return textResult(formatter, result as unknown as JsonRecord)
+			},
+		},
+		{
+			name: "balloon_run_install_diagnostics",
+			title: "Run Install Diagnostics",
+			description: "Runs a Balloon install doctor pass for a repo or host config and explains the next fixes before strangers should trust the setup.",
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				properties: {
+					host: {
+						type: "string",
+						enum: ["vscode", "cline", "roo_code", "claude_desktop", "generic_json"],
+						description: "Optional host or host family to diagnose. When omitted, Balloon checks repo-level readiness only.",
+					},
+					repoPath: { type: "string", description: "Optional local Balloon repo path. Defaults to the server process cwd." },
+					configPath: { type: "string", description: "Optional path to a host config file to validate during the install doctor pass." },
+					configJson: { type: "string", description: "Optional inline host config JSON to validate during the install doctor pass." },
+					serverName: { type: "string", description: "Optional MCP server entry name. Defaults to balloon-mcp." },
+				},
+			},
+			run: (args, context) => {
+				const result = buildInstallDiagnostics(context.store, {
+					host: args.host,
+					repoPath: args.repoPath,
+					configPath: args.configPath,
+					configJson: args.configJson,
+					serverName: args.serverName,
+				})
+				const formatter = formatInstallDiagnostics(result)
+				if (!result.overallReady) return toolError(formatter, result as unknown as JsonRecord)
+				return textResult(formatter, result as unknown as JsonRecord)
+			},
+		},
+		{
+			name: "balloon_prepare_host_flow_packet",
+			title: "Prepare Host Flow Packet",
+			description: "Builds a host-specific invocation packet for repair, review, benchmark, and install flows so users can stay on the most reliable path when prompt routing is flaky.",
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["host", "flow"],
+				properties: {
+					host: {
+						type: "string",
+						enum: ["vscode", "cline", "roo_code", "claude_desktop", "generic_json"],
+						description: "Target MCP host or host family.",
+					},
+					flow: {
+						type: "string",
+						enum: ["run_cycle", "repair_next_turn", "review_session_drift", "compare_benchmark_lanes", "install_diagnostics"],
+						description: "Host flow to prepare.",
+					},
+					sessionId: { type: "string", description: "Optional Balloon session id. If omitted, placeholder args are returned." },
+					userRequest: { type: "string", description: "Optional user request used in repair or demo-oriented flow packets." },
+					turns: {
+						type: "array",
+						description: "Optional turns for the run_cycle flow packet. If omitted, placeholder demo turns are returned.",
+						items: {
+							type: "object",
+							required: ["role", "content"],
+							properties: {
+								role: { type: "string", enum: ["user", "assistant", "system"] },
+								content: { type: "string" },
+								timestamp: { type: "string" },
+							},
+						},
+					},
+					repoPath: { type: "string", description: "Optional Balloon repo path used for the install_diagnostics flow packet." },
+					configPath: { type: "string", description: "Optional host config path used for the install_diagnostics flow packet." },
+					configJson: { type: "string", description: "Optional inline host config JSON used for the install_diagnostics flow packet." },
+					serverName: { type: "string", description: "Optional MCP server entry name. Defaults to balloon-mcp." },
+				},
+			},
+			run: (args, context) => {
+				const packet = buildHostFlowPacket(context.store, {
+					host: args.host,
+					flow: args.flow,
+					sessionId: args.sessionId,
+					userRequest: args.userRequest,
+					turns: args.turns,
+					repoPath: args.repoPath,
+					configPath: args.configPath,
+					configJson: args.configJson,
+					serverName: args.serverName,
+				})
+				return textResult(formatHostFlowPacket(packet), packet as unknown as JsonRecord)
+			},
+		},
+		{
+			name: "balloon_prepare_host_validation_suite",
+			title: "Prepare Host Validation Suite",
+			description: "Builds the same-chat and fresh-chat validation suite Balloon recommends for checking host reliability without relying on private verbal guidance.",
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["host"],
+				properties: {
+					host: {
+						type: "string",
+						enum: ["vscode", "cline", "roo_code", "claude_desktop", "generic_json"],
+						description: "Target MCP host or host family.",
+					},
+					sessionId: { type: "string", description: "Optional Balloon session id. If omitted, placeholder packets are returned." },
+					userRequest: { type: "string", description: "Optional user request used in repair-oriented validation cases." },
+					turns: {
+						type: "array",
+						description: "Optional turns used to seed the same-chat validation cases.",
+						items: {
+							type: "object",
+							required: ["role", "content"],
+							properties: {
+								role: { type: "string", enum: ["user", "assistant", "system"] },
+								content: { type: "string" },
+								timestamp: { type: "string" },
+							},
+						},
+					},
+					repoPath: { type: "string", description: "Optional Balloon repo path used by the install-doctor case." },
+					configPath: { type: "string", description: "Optional host config path used by the install-doctor case." },
+					configJson: { type: "string", description: "Optional inline host config JSON used by the install-doctor case." },
+					serverName: { type: "string", description: "Optional MCP server entry name. Defaults to balloon-mcp." },
+				},
+			},
+			run: (args, context) => {
+				const suite = buildHostValidationSuite(context.store, {
+					host: args.host,
+					sessionId: args.sessionId,
+					userRequest: args.userRequest,
+					turns: args.turns,
+					repoPath: args.repoPath,
+					configPath: args.configPath,
+					configJson: args.configJson,
+					serverName: args.serverName,
+				})
+				return textResult(formatHostValidationSuite(suite), suite as unknown as JsonRecord)
+			},
+		},
+		{
+			name: "balloon_record_host_validation_result",
+			title: "Record Host Validation Result",
+			description: "Stores a real host validation outcome so Balloon can build an evidence-backed reliability picture instead of relying on memory or private notes.",
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["host", "caseId", "status", "summary"],
+				properties: {
+					host: {
+						type: "string",
+						enum: ["vscode", "cline", "roo_code", "claude_desktop", "generic_json"],
+						description: "Target MCP host or host family.",
+					},
+					caseId: {
+						type: "string",
+						enum: HOST_VALIDATION_CASE_IDS,
+						description: "Validation case id from the built-in host validation suite.",
+					},
+					status: { type: "string", enum: ["pass", "partial", "fail"], description: "Observed result for the validation case." },
+					summary: { type: "string", description: "Short human-readable summary of what happened in the host." },
+					findings: { type: "array", description: "Optional concrete findings from the run.", items: { type: "string" } },
+					suggestedFixes: { type: "array", description: "Optional concrete follow-up fixes or mitigations.", items: { type: "string" } },
+					sessionId: { type: "string", description: "Optional Balloon session id used during the host run." },
+					hostVersion: { type: "string", description: "Optional host build or extension version observed during the run." },
+					recordedAt: { type: "string", description: "Optional ISO timestamp override for backfilling evidence." },
+				},
+			},
+			run: (args, context) => {
+				const host = parseHostKind(args.host)
+				const caseId = parseHostValidationCaseId(args.caseId)
+				const status = parseHostValidationStatus(args.status)
+				const summary = asString(args.summary)
+				if (!caseId) return toolError("caseId must be one of the built-in host validation cases.")
+				if (!status) return toolError("status must be pass, partial, or fail.")
+				if (!summary) return toolError("summary is required.")
+				const suite = buildHostValidationSuite(context.store, { host })
+				const validationCase = suite.cases.find((entry) => entry.caseId === caseId)
+				if (!validationCase) return toolError(`Unknown validation case for ${host}: ${caseId}`)
+				const recordedAt = asString(args.recordedAt) ?? new Date().toISOString()
+				const evidence: BalloonHostValidationEvidence = {
+					runId: `host-validation-${crypto.randomUUID()}`,
+					host,
+					caseId,
+					status,
+					chatStateUnderTest: validationCase.chatStateUnderTest,
+					summary,
+					findings: asStringArray(args.findings),
+					suggestedFixes: asStringArray(args.suggestedFixes),
+					sessionId: asString(args.sessionId),
+					hostVersion: asString(args.hostVersion),
+					recordedAt,
+				}
+				context.store.saveHostValidationEvidence(evidence)
+				return textResult(formatHostValidationEvidence(evidence), evidence as unknown as JsonRecord)
+			},
+		},
+		{
+			name: "balloon_summarize_host_validation_results",
+			title: "Summarize Host Validation Results",
+			description: "Rolls up recorded host validation evidence into a per-host reliability summary with coverage, latest status, and open risks.",
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["host"],
+				properties: {
+					host: {
+						type: "string",
+						enum: ["vscode", "cline", "roo_code", "claude_desktop", "generic_json"],
+						description: "Target MCP host or host family.",
+					},
+				},
+			},
+			run: (args, context) => {
+				const host = parseHostKind(args.host)
+				const summary = buildHostValidationEvidenceSummary(context.store, host)
+				return textResult(formatHostValidationEvidenceSummary(summary), summary as unknown as JsonRecord)
 			},
 		},
 		{
@@ -1825,6 +3949,62 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 			},
 		},
 		{
+			name: "balloon_export_slopcode_starter_artifacts",
+			title: "Export SlopCodeBench Starter Artifacts",
+			description: "Writes starter-suite score summaries and per-problem checkpoint artifacts to JSON and Markdown files for repo-backed benchmark tracking.",
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				properties: {
+					datasetRoot: { type: "string", description: "Optional local path to a SlopCodeBench snapshot or clone." },
+					problemNames: { type: "array", description: "Optional subset of starter-suite problems to export.", items: { type: "string" } },
+					outputDir: { type: "string", description: "Optional output directory for the exported artifact bundle." },
+					semanticAdapterPath: { type: "string", description: "Optional semantic adapter path for the assist lane." },
+					semanticTimeoutMs: { type: "number", description: "Optional semantic adapter timeout in milliseconds." },
+					semanticMaxNotes: { type: "number", description: "Optional cap on semantic notes returned." },
+					forceStageCount: { type: "number", description: "Optional global stage override. Defaults to each problem's recommended stage count." },
+					stageThresholds: { type: "array", description: "Optional global staged-lane thresholds.", items: { type: "number" } },
+				},
+			},
+			run: (args, context) => {
+				const bundle = buildStarterSuiteArtifactExport(context.store, {
+					datasetRoot: asString(args.datasetRoot),
+					problemNames: asStringArray(args.problemNames),
+					outputDir: asString(args.outputDir),
+					semanticAdapterPath: args.semanticAdapterPath,
+					semanticTimeoutMs: args.semanticTimeoutMs,
+					semanticMaxNotes: args.semanticMaxNotes,
+					forceStageCount: args.forceStageCount,
+					stageThresholds: args.stageThresholds,
+				})
+				if (!bundle) {
+					return toolError("No scored starter-suite sessions were available to export yet. Run and score at least one starter-suite problem first.")
+				}
+				const text = [
+					"Balloon SCBench starter-suite artifacts exported.",
+					"",
+					`Output directory: ${bundle.outputDir}`,
+					`Covered problems: ${bundle.coveredProblems}/${bundle.totalProblems}`,
+					`Top lane(s): ${bundle.topLanes.join(", ") || "none"}`,
+					`Summary JSON: ${bundle.summaryJsonPath}`,
+					`Summary Markdown: ${bundle.summaryMarkdownPath}`,
+					"",
+					"Suite regressions",
+					...(bundle.regressions.length > 0 ? bundle.regressions.map((note, index) => `${index + 1}. ${note}`) : ["None recorded."]),
+					"",
+					"Problem artifacts",
+					...bundle.problems.flatMap((problem, index) => [
+						`${index + 1}. ${problem.problemName}`,
+						`Covered: ${problem.covered ? "yes" : "no"}`,
+						`JSON: ${problem.jsonPath}`,
+						`Markdown: ${problem.markdownPath}`,
+						...(problem.regressions.length > 0 ? problem.regressions.map((note, noteIndex) => `Regression ${noteIndex + 1}: ${note}`) : []),
+					]),
+				].join("\n")
+				return textResult(text, bundle as unknown as JsonRecord)
+			},
+		},
+		{
 			name: "balloon_prepare_slopcode_problem",
 			title: "Prepare SlopCodeBench Problem",
 			description: "Prepares one starter-suite SlopCodeBench problem for Balloon benchmarking, including checkpoint files, scoring focus, and the next compare-lanes prompt.",
@@ -1863,6 +4043,28 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 				const sessionId = asString(args.sessionId)
 				if (!sessionId) return toolError("sessionId is required.")
 				const bundle = buildReviewPromptBundle(context.store, sessionId)
+				const turns = context.store.getTurns(sessionId, 100)
+				const profile = context.store.getProfile(sessionId) ?? buildStructuredProfile(sessionId, turns)
+				const latestUserRequest = findLatestTurnContent(turns, "user")
+				const latestResponse = findLatestTurnContent(turns, "assistant")
+				const hiddenRequirements =
+					latestUserRequest && latestResponse ? detectHiddenRequirements(latestUserRequest, latestResponse).filter((requirement) => !requirement.coveredByResponse) : []
+				const driftPressure =
+					latestResponse !== undefined
+						? buildDriftPressure(sessionId, profile, latestResponse, latestUserRequest, bundle.gaps, hiddenRequirements)
+						: null
+				const pressureSnapshot =
+					driftPressure && latestResponse !== undefined
+						? persistDriftPressureSnapshot(context.store, {
+								sessionId,
+								source: "review",
+								turnCount: turns.length,
+								requestText: latestUserRequest,
+								latestResponse,
+								pressure: driftPressure,
+							})
+						: null
+				const pressureHistory = buildDriftPressureHistorySummary(context.store, sessionId)
 				const trickleLines = bundle.trickles.map((trickle) => `${trickle.summary} -> ${trickle.priorityInstructions.join("; ")}`)
 				const text = [
 					"Balloon drift-review packet ready.",
@@ -1872,6 +4074,10 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					"",
 					"Recent gaps",
 					formatGaps(bundle.gaps),
+					...(driftPressure ? ["", "Drift pressure", formatDriftPressure(driftPressure)] : []),
+					"",
+					"Pressure history",
+					formatDriftPressureHistory(pressureHistory),
 					"",
 					"Recent proxy trickles",
 					formatList(trickleLines, "No recent trickles recorded."),
@@ -1883,6 +4089,9 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					sessionId,
 					summaryText: bundle.summaryText,
 					gaps: bundle.gaps,
+					driftPressure,
+					pressureSnapshot,
+					pressureHistory,
 					trickles: bundle.trickles,
 					promptMessages: bundle.messages,
 				})
@@ -1952,6 +4161,41 @@ export function listBalloonResources(store: BalloonStateStore): ResourceDefiniti
 	const starterSuite = buildSlopCodeStarterSuite()
 	const benchmarkResources: ResourceDefinition[] = [
 		{
+			uri: "balloon://hosts/matrix",
+			name: "host-matrix",
+			title: "Balloon Host Matrix",
+			description: "Current Balloon host readiness tiers, config roots, and first-use guidance.",
+			mimeType: "application/json",
+		},
+		...getHostSurfaceCatalog().map((surface) => ({
+			uri: `balloon://hosts/${surface.host}`,
+			name: `host-${surface.host}`,
+			title: `Balloon Host Surface (${surface.displayName})`,
+			description: "Host-specific Balloon MCP guidance, caveats, and tool-first recommendations.",
+			mimeType: "application/json",
+		})),
+		...getHostSurfaceCatalog().map((surface) => ({
+			uri: `balloon://hosts/${surface.host}/playbook`,
+			name: `host-${surface.host}-playbook`,
+			title: `Balloon Host Playbook (${surface.displayName})`,
+			description: "Host-specific Balloon flow packets for install, repair, review, and benchmark paths.",
+			mimeType: "application/json",
+		})),
+		...getHostSurfaceCatalog().map((surface) => ({
+			uri: `balloon://hosts/${surface.host}/validation-suite`,
+			name: `host-${surface.host}-validation-suite`,
+			title: `Balloon Host Validation Suite (${surface.displayName})`,
+			description: "Host-specific same-chat and fresh-chat validation suite for Balloon MCP.",
+			mimeType: "application/json",
+		})),
+		...getHostSurfaceCatalog().map((surface) => ({
+			uri: `balloon://hosts/${surface.host}/validation-evidence`,
+			name: `host-${surface.host}-validation-evidence`,
+			title: `Balloon Host Validation Evidence (${surface.displayName})`,
+			description: "Recorded host validation evidence and reliability summary for Balloon MCP.",
+			mimeType: "application/json",
+		})),
+		{
 			uri: "balloon://benchmark/slopcode/starter-suite",
 			name: "slopcode-starter-suite",
 			title: "Balloon SlopCodeBench Starter Suite",
@@ -1998,6 +4242,13 @@ export function listBalloonResources(store: BalloonStateStore): ResourceDefiniti
 			mimeType: "application/json",
 		},
 		{
+			uri: `balloon://sessions/${summary.sessionId}/pressure`,
+			name: `${summary.sessionId}-pressure`,
+			title: `Balloon Drift Pressure History (${summary.sessionId})`,
+			description: "Recent Balloon drift-pressure snapshots and trend summary.",
+			mimeType: "application/json",
+		},
+		{
 			uri: `balloon://sessions/${summary.sessionId}/trickles`,
 			name: `${summary.sessionId}-trickles`,
 			title: `Balloon Trickle Ledger (${summary.sessionId})`,
@@ -2023,6 +4274,29 @@ export function listBalloonResources(store: BalloonStateStore): ResourceDefiniti
 }
 
 export function readBalloonResource(store: BalloonStateStore, uri: string): ResourceContent | null {
+	if (uri === "balloon://hosts/matrix") {
+		return { uri, mimeType: "application/json", text: JSON.stringify(getHostSurfaceCatalog(), null, 2) }
+	}
+	const hostValidationEvidenceMatch = /^balloon:\/\/hosts\/([^/]+)\/validation-evidence$/u.exec(uri)
+	if (hostValidationEvidenceMatch) {
+		const host = parseHostKind(hostValidationEvidenceMatch[1] ?? "vscode")
+		return { uri, mimeType: "application/json", text: JSON.stringify(buildHostValidationEvidenceSummary(store, host), null, 2) }
+	}
+	const hostValidationMatch = /^balloon:\/\/hosts\/([^/]+)\/validation-suite$/u.exec(uri)
+	if (hostValidationMatch) {
+		const host = parseHostKind(hostValidationMatch[1] ?? "vscode")
+		return { uri, mimeType: "application/json", text: JSON.stringify(buildHostValidationSuite(store, { host }), null, 2) }
+	}
+	const hostPlaybookMatch = /^balloon:\/\/hosts\/([^/]+)\/playbook$/u.exec(uri)
+	if (hostPlaybookMatch) {
+		const host = parseHostKind(hostPlaybookMatch[1] ?? "vscode")
+		return { uri, mimeType: "application/json", text: JSON.stringify(buildHostPlaybook(store, host), null, 2) }
+	}
+	const hostMatch = /^balloon:\/\/hosts\/([^/]+)$/u.exec(uri)
+	if (hostMatch) {
+		const surface = getHostSurface(parseHostKind(hostMatch[1] ?? "vscode"))
+		return { uri, mimeType: "application/json", text: JSON.stringify(surface, null, 2) }
+	}
 	if (uri === "balloon://benchmark/slopcode/starter-suite") {
 		return { uri, mimeType: "application/json", text: JSON.stringify(buildSlopCodeStarterSuite(), null, 2) }
 	}
@@ -2036,7 +4310,7 @@ export function readBalloonResource(store: BalloonStateStore, uri: string): Reso
 		if (!preparation) return null
 		return { uri, mimeType: "application/json", text: JSON.stringify(preparation, null, 2) }
 	}
-	const match = /^balloon:\/\/sessions\/([^/]+)\/(summary|profile|gaps|trickles|memory|releases)$/u.exec(uri)
+	const match = /^balloon:\/\/sessions\/([^/]+)\/(summary|profile|gaps|pressure|trickles|memory|releases)$/u.exec(uri)
 	if (!match) return null
 	const sessionId = match[1] ?? ""
 	const resourceName = match[2] ?? ""
@@ -2053,6 +4327,19 @@ export function readBalloonResource(store: BalloonStateStore, uri: string): Reso
 		}
 		case "gaps":
 			return { uri, mimeType: "application/json", text: JSON.stringify(store.getRecentGaps(sessionId, 20), null, 2) }
+		case "pressure":
+			return {
+				uri,
+				mimeType: "application/json",
+				text: JSON.stringify(
+					{
+						summary: buildDriftPressureHistorySummary(store, sessionId),
+						snapshots: store.listDriftPressureSnapshots(sessionId, 20),
+					},
+					null,
+					2,
+				),
+			}
 		case "trickles":
 			return { uri, mimeType: "application/json", text: JSON.stringify(store.getRecentTrickles(sessionId, 20), null, 2) }
 		case "memory":

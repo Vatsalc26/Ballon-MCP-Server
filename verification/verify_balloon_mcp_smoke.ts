@@ -27,9 +27,16 @@ type SmokeResult = {
 	benchmarkLaneCompareWorked: boolean
 	benchmarkLaneScoreWorked: boolean
 	longSessionBenchmarkScoreWorked: boolean
+	hostSetupPacketWorked: boolean
+	hostSetupValidationWorked: boolean
+	installDiagnosticsWorked: boolean
+	hostFlowPacketWorked: boolean
+	hostValidationSuiteWorked: boolean
+	hostValidationEvidenceWorked: boolean
 	slopcodeStarterSuiteWorked: boolean
 	slopcodeStarterRunbookWorked: boolean
 	slopcodeStarterSummaryWorked: boolean
+	slopcodeStarterArtifactExportWorked: boolean
 	slopcodeProblemPrepWorked: boolean
 	reviewDriftFallbackWorked: boolean
 	profileBuilt: boolean
@@ -246,9 +253,17 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			hasTool(toolsList, "balloon_score_benchmark_lanes") &&
 			hasTool(toolsList, "balloon_run_long_session_benchmark") &&
 			hasTool(toolsList, "balloon_score_long_session_benchmark") &&
+			hasTool(toolsList, "balloon_prepare_host_setup_packet") &&
+			hasTool(toolsList, "balloon_validate_host_setup") &&
+			hasTool(toolsList, "balloon_run_install_diagnostics") &&
+			hasTool(toolsList, "balloon_prepare_host_flow_packet") &&
+			hasTool(toolsList, "balloon_prepare_host_validation_suite") &&
+			hasTool(toolsList, "balloon_record_host_validation_result") &&
+			hasTool(toolsList, "balloon_summarize_host_validation_results") &&
 			hasTool(toolsList, "balloon_describe_slopcode_starter_suite") &&
 			hasTool(toolsList, "balloon_plan_slopcode_starter_benchmark") &&
 			hasTool(toolsList, "balloon_summarize_slopcode_starter_suite") &&
+			hasTool(toolsList, "balloon_export_slopcode_starter_artifacts") &&
 			hasTool(toolsList, "balloon_prepare_slopcode_problem") &&
 			hasTool(toolsList, "balloon_review_session_drift")
 		details.push(`toolSurfacePassed=${toolSurfacePassed ? "yes" : "no"}`)
@@ -271,9 +286,21 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 					{ role: "assistant", content: latestResponse },
 				],
 			},
-		})) as { structuredContent?: { gapCount?: number; trickle?: { priorityInstructions?: string[] }; memoryUpdates?: Array<{ count?: number }> } }
+		})) as {
+			structuredContent?: {
+				gapCount?: number
+				driftPressure?: { score?: number; level?: string; reasons?: string[] }
+				persistentBias?: { focusOrder?: string[]; reasons?: string[] }
+				trickle?: { priorityInstructions?: string[] }
+				memoryUpdates?: Array<{ count?: number }>
+			}
+		}
 		const heroCyclePassed =
 			(heroCycle.structuredContent?.gapCount ?? 0) >= 1 &&
+			(heroCycle.structuredContent?.driftPressure?.score ?? 0) >= 20 &&
+			(heroCycle.structuredContent?.driftPressure?.reasons?.length ?? 0) >= 1 &&
+			(heroCycle.structuredContent?.persistentBias?.focusOrder?.length ?? 0) >= 1 &&
+			(heroCycle.structuredContent?.persistentBias?.reasons?.length ?? 0) >= 1 &&
 			(heroCycle.structuredContent?.trickle?.priorityInstructions?.length ?? 0) > 0 &&
 			(heroCycle.structuredContent?.memoryUpdates?.length ?? 0) > 0
 		details.push(`heroCyclePassed=${heroCyclePassed ? "yes" : "no"}`)
@@ -300,10 +327,21 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 				sessionId: `${sessionId}-hero`,
 				userRequest: latestUserRequest,
 			},
-		})) as { structuredContent?: { repairedReply?: string; correctionSummary?: string; promptMessages?: Array<{ content?: { text?: string } }> } }
+		})) as {
+			structuredContent?: {
+				repairedReply?: string
+				correctionSummary?: string
+				driftPressure?: { level?: string; score?: number }
+				persistentBias?: { focusOrder?: string[] }
+				promptMessages?: Array<{ content?: { text?: string } }>
+			}
+		}
 		const repairFallbackWorked =
 			Boolean(repairFallback.structuredContent?.repairedReply?.includes("I would")) &&
 			Boolean(repairFallback.structuredContent?.correctionSummary?.includes("Balloon corrected")) &&
+			Boolean(repairFallback.structuredContent?.driftPressure?.level) &&
+			(repairFallback.structuredContent?.driftPressure?.score ?? 0) >= 20 &&
+			(repairFallback.structuredContent?.persistentBias?.focusOrder?.length ?? 0) >= 1 &&
 			Array.isArray(repairFallback.structuredContent?.promptMessages) &&
 			(repairFallback.structuredContent?.promptMessages?.length ?? 0) >= 2
 		details.push(`repairFallbackWorked=${repairFallbackWorked ? "yes" : "no"}`)
@@ -384,13 +422,17 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 		})) as {
 			structuredContent?: {
 				activeStageCount?: number
+				driftPressure?: { level?: string; score?: number }
 				stagedReply?: string
-				releasePacket?: { released?: Array<{ sourceText?: string }> }
+				releasePacket?: { persistentFocus?: string[]; released?: Array<{ sourceText?: string; biasReasons?: string[] }> }
 			}
 		}
 		const stagedCycleWorked =
 			(stagedCycle.structuredContent?.activeStageCount ?? 0) === 3 &&
+			Boolean(stagedCycle.structuredContent?.driftPressure?.level) &&
+			(stagedCycle.structuredContent?.driftPressure?.score ?? 0) >= 20 &&
 			Boolean(stagedCycle.structuredContent?.stagedReply?.includes("I would")) &&
+			(stagedCycle.structuredContent?.releasePacket?.persistentFocus?.length ?? 0) >= 1 &&
 			(stagedCycle.structuredContent?.releasePacket?.released?.length ?? 0) >= 1
 		details.push(`stagedCycleWorked=${stagedCycleWorked ? "yes" : "no"}`)
 
@@ -461,8 +503,10 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 		})) as {
 			structuredContent?: {
 				totalTurnCount?: number
+				pressureHistory?: { totalSnapshots?: number; trend?: string }
 				executedCheckpoints?: Array<{
 					actualTurnCount?: number
+					driftPressure?: { score?: number; level?: string }
 					comparison?: {
 						baselineReply?: string
 						assistSemanticCara?: { status?: string }
@@ -474,8 +518,10 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 		}
 		const longSessionBenchmarkWorked =
 			(longSessionBenchmark.structuredContent?.totalTurnCount ?? 0) >= 5 &&
+			(longSessionBenchmark.structuredContent?.pressureHistory?.totalSnapshots ?? 0) >= 1 &&
 			(longSessionBenchmark.structuredContent?.executedCheckpoints?.length ?? 0) >= 2 &&
 			(longSessionBenchmark.structuredContent?.executedCheckpoints?.[0]?.actualTurnCount ?? 0) >= 3 &&
+			(longSessionBenchmark.structuredContent?.executedCheckpoints?.[0]?.driftPressure?.score ?? 0) >= 20 &&
 			Boolean(longSessionBenchmark.structuredContent?.executedCheckpoints?.[0]?.comparison?.baselineReply?.includes("Absolutely")) &&
 			longSessionBenchmark.structuredContent?.executedCheckpoints?.[0]?.comparison?.assistSemanticCara?.status === "assisted" &&
 			longSessionBenchmark.structuredContent?.executedCheckpoints?.[0]?.comparison?.stagedActiveStageCount === 3 &&
@@ -493,16 +539,209 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 		})) as {
 			structuredContent?: {
 				topLanes?: string[]
+				pressureHistory?: { totalSnapshots?: number }
 				laneTotals?: { baseline?: number; assist?: number; staged?: number; maxTotal?: number }
-				executedCheckpoints?: Array<{ scorecard?: { assist?: { total?: number } } }>
+				executedCheckpoints?: Array<{ driftPressure?: { score?: number }; scorecard?: { assist?: { total?: number } } }>
 			}
 		}
 		const longSessionBenchmarkScoreWorked =
 			(longSessionBenchmarkScore.structuredContent?.topLanes?.length ?? 0) >= 1 &&
+			(longSessionBenchmarkScore.structuredContent?.pressureHistory?.totalSnapshots ?? 0) >= 1 &&
 			(longSessionBenchmarkScore.structuredContent?.executedCheckpoints?.length ?? 0) >= 2 &&
+			(longSessionBenchmarkScore.structuredContent?.executedCheckpoints?.[0]?.driftPressure?.score ?? 0) >= 20 &&
 			(longSessionBenchmarkScore.structuredContent?.laneTotals?.assist ?? 0) >= (longSessionBenchmarkScore.structuredContent?.laneTotals?.baseline ?? 0) &&
 			(longSessionBenchmarkScore.structuredContent?.laneTotals?.staged ?? 0) >= (longSessionBenchmarkScore.structuredContent?.laneTotals?.baseline ?? 0)
 		details.push(`longSessionBenchmarkScoreWorked=${longSessionBenchmarkScoreWorked ? "yes" : "no"}`)
+
+		const hostSetupPacket = (await client.request("tools/call", {
+			name: "balloon_prepare_host_setup_packet",
+			arguments: {
+				host: "cline",
+			},
+		})) as {
+			structuredContent?: {
+				host?: string
+				configRoot?: string
+				buildReady?: boolean
+				configSnippet?: string
+				recommendedFirstTools?: string[]
+			}
+		}
+		const hostSetupPacketWorked =
+			hostSetupPacket.structuredContent?.host === "cline" &&
+			hostSetupPacket.structuredContent?.configRoot === "mcpServers" &&
+			hostSetupPacket.structuredContent?.buildReady === true &&
+			Boolean(hostSetupPacket.structuredContent?.configSnippet?.includes("\"mcpServers\"")) &&
+			(hostSetupPacket.structuredContent?.recommendedFirstTools?.includes("balloon_run_cycle") ?? false)
+		details.push(`hostSetupPacketWorked=${hostSetupPacketWorked ? "yes" : "no"}`)
+
+		const hostSetupValidation = (await client.request("tools/call", {
+			name: "balloon_validate_host_setup",
+			arguments: {
+				host: "cline",
+				configJson: hostSetupPacket.structuredContent?.configSnippet ?? "",
+			},
+		})) as {
+			structuredContent?: {
+				valid?: boolean
+				actualConfigRoot?: string
+				foundServerEntry?: boolean
+				buildReady?: boolean | null
+				errors?: string[]
+			}
+		}
+		const hostSetupValidationWorked =
+			hostSetupValidation.structuredContent?.valid === true &&
+			hostSetupValidation.structuredContent?.actualConfigRoot === "mcpServers" &&
+			hostSetupValidation.structuredContent?.foundServerEntry === true &&
+			hostSetupValidation.structuredContent?.buildReady === true &&
+			(hostSetupValidation.structuredContent?.errors?.length ?? 0) === 0
+		details.push(`hostSetupValidationWorked=${hostSetupValidationWorked ? "yes" : "no"}`)
+
+		const installDiagnostics = (await client.request("tools/call", {
+			name: "balloon_run_install_diagnostics",
+			arguments: {
+				host: "cline",
+				configJson: hostSetupPacket.structuredContent?.configSnippet ?? "",
+			},
+		})) as {
+			structuredContent?: {
+				host?: string | null
+				configCheckMode?: string
+				promptFallbackReady?: boolean
+				benchmarkSurfaceReady?: boolean
+				overallReady?: boolean
+				recommendedFirstTools?: string[]
+				hostConfigValidation?: { valid?: boolean; buildReady?: boolean | null }
+			}
+		}
+		const installDiagnosticsWorked =
+			installDiagnostics.structuredContent?.host === "cline" &&
+			installDiagnostics.structuredContent?.configCheckMode === "provided" &&
+			installDiagnostics.structuredContent?.promptFallbackReady === true &&
+			installDiagnostics.structuredContent?.benchmarkSurfaceReady === true &&
+			installDiagnostics.structuredContent?.overallReady === true &&
+			(installDiagnostics.structuredContent?.recommendedFirstTools?.includes("balloon_run_cycle") ?? false) &&
+			installDiagnostics.structuredContent?.hostConfigValidation?.valid === true &&
+			installDiagnostics.structuredContent?.hostConfigValidation?.buildReady === true
+		details.push(`installDiagnosticsWorked=${installDiagnosticsWorked ? "yes" : "no"}`)
+
+		const hostFlowPacket = (await client.request("tools/call", {
+			name: "balloon_prepare_host_flow_packet",
+			arguments: {
+				host: "cline",
+				flow: "repair_next_turn",
+				sessionId: `${sessionId}-hero`,
+				userRequest: latestUserRequest,
+			},
+		})) as {
+			structuredContent?: {
+				host?: string
+				flow?: string
+				preferredSurface?: string
+				alternateSurface?: string
+				toolName?: string | null
+				promptName?: string | null
+				promptPacket?: { description?: string; messages?: Array<{ text?: string }> } | null
+				ifHostFeelsFlaky?: string[]
+			}
+		}
+		const hostFlowPacketWorked =
+			hostFlowPacket.structuredContent?.host === "cline" &&
+			hostFlowPacket.structuredContent?.flow === "repair_next_turn" &&
+			hostFlowPacket.structuredContent?.preferredSurface === "tool" &&
+			hostFlowPacket.structuredContent?.alternateSurface === "prompt" &&
+			hostFlowPacket.structuredContent?.toolName === "balloon_repair_next_turn" &&
+			hostFlowPacket.structuredContent?.promptName === "balloon/repair-next-turn" &&
+			(hostFlowPacket.structuredContent?.promptPacket?.messages?.length ?? 0) >= 1 &&
+			Boolean(hostFlowPacket.structuredContent?.promptPacket?.description?.includes("Repair the next answer")) &&
+			(hostFlowPacket.structuredContent?.ifHostFeelsFlaky?.length ?? 0) >= 2
+		details.push(`hostFlowPacketWorked=${hostFlowPacketWorked ? "yes" : "no"}`)
+
+		const hostValidationSuite = (await client.request("tools/call", {
+			name: "balloon_prepare_host_validation_suite",
+			arguments: {
+				host: "cline",
+				sessionId: `${sessionId}-hero`,
+				userRequest: latestUserRequest,
+			},
+		})) as {
+			structuredContent?: {
+				host?: string
+				recommendedOrder?: string[]
+				cases?: Array<{ caseId?: string; primaryPacket?: { flow?: string; toolName?: string | null } }>
+			}
+		}
+		const hostValidationSuiteWorked =
+			hostValidationSuite.structuredContent?.host === "cline" &&
+			(hostValidationSuite.structuredContent?.recommendedOrder?.length ?? 0) >= 5 &&
+			hostValidationSuite.structuredContent?.recommendedOrder?.[0] === "install_doctor" &&
+			(hostValidationSuite.structuredContent?.cases?.some(
+				(validationCase) => validationCase.caseId === "same_chat_tool_repair" && validationCase.primaryPacket?.toolName === "balloon_repair_next_turn",
+			) ??
+				false) &&
+			(hostValidationSuite.structuredContent?.cases?.some(
+				(validationCase) => validationCase.caseId === "same_chat_benchmark_compare" && validationCase.primaryPacket?.flow === "compare_benchmark_lanes",
+			) ??
+				false)
+		details.push(`hostValidationSuiteWorked=${hostValidationSuiteWorked ? "yes" : "no"}`)
+
+		const recordedHostValidation = (await client.request("tools/call", {
+			name: "balloon_record_host_validation_result",
+			arguments: {
+				host: "cline",
+				caseId: "same_chat_tool_repair",
+				status: "pass",
+				summary: "Tool-first repair stayed stable in the same chat.",
+				findings: ["Tool list stayed visible after earlier Balloon calls."],
+				suggestedFixes: ["Keep prompt-path checks separate from tool-path checks."],
+				sessionId: `${sessionId}-hero`,
+				hostVersion: "smoke-harness",
+			},
+		})) as {
+			structuredContent?: {
+				host?: string
+				caseId?: string
+				status?: string
+				findings?: string[]
+				suggestedFixes?: string[]
+				sessionId?: string | null
+			}
+		}
+		const hostValidationRecordWorked =
+			recordedHostValidation.structuredContent?.host === "cline" &&
+			recordedHostValidation.structuredContent?.caseId === "same_chat_tool_repair" &&
+			recordedHostValidation.structuredContent?.status === "pass" &&
+			(recordedHostValidation.structuredContent?.findings?.length ?? 0) >= 1 &&
+			(recordedHostValidation.structuredContent?.suggestedFixes?.length ?? 0) >= 1 &&
+			recordedHostValidation.structuredContent?.sessionId === `${sessionId}-hero`
+		details.push(`hostValidationRecordWorked=${hostValidationRecordWorked ? "yes" : "no"}`)
+
+		const hostValidationSummary = (await client.request("tools/call", {
+			name: "balloon_summarize_host_validation_results",
+			arguments: {
+				host: "cline",
+			},
+		})) as {
+			structuredContent?: {
+				host?: string
+				totalRuns?: number
+				passCount?: number
+				coverage?: { completedCases?: number; totalCases?: number }
+				cases?: Array<{ caseId?: string; latestStatus?: string }>
+			}
+		}
+		const hostValidationEvidenceWorked =
+			hostValidationSummary.structuredContent?.host === "cline" &&
+			(hostValidationSummary.structuredContent?.totalRuns ?? 0) >= 1 &&
+			(hostValidationSummary.structuredContent?.passCount ?? 0) >= 1 &&
+			(hostValidationSummary.structuredContent?.coverage?.completedCases ?? 0) >= 1 &&
+			(hostValidationSummary.structuredContent?.coverage?.totalCases ?? 0) >= 5 &&
+			(hostValidationSummary.structuredContent?.cases?.some(
+				(validationCase) => validationCase.caseId === "same_chat_tool_repair" && validationCase.latestStatus === "pass",
+			) ??
+				false)
+		details.push(`hostValidationEvidenceWorked=${hostValidationEvidenceWorked ? "yes" : "no"}`)
 
 		const starterSuite = (await client.request("tools/call", {
 			name: "balloon_describe_slopcode_starter_suite",
@@ -553,6 +792,88 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			(starterSuiteSummary.structuredContent?.problems?.[0]?.sessionPresent ?? false) === false
 		details.push(`slopcodeStarterSummaryWorked=${slopcodeStarterSummaryWorked ? "yes" : "no"}`)
 
+		await client.request("tools/call", {
+			name: "balloon_score_long_session_benchmark",
+			arguments: {
+				sessionId: "scbench-file-backup",
+				turns: [
+					{
+						role: "user",
+						content: "Checkpoint 1: build a bounded backup scheduler CLI. Keep YAML config, exclusions, and JSONL history. Do not rewrite architecture. Tests are required.",
+					},
+					{
+						role: "assistant",
+						content: "Absolutely, I will replace the scheduler with a new orchestration framework first and we can add tests later.",
+					},
+					{
+						role: "user",
+						content: "Checkpoint 2: keep the CLI bounded, add pack support, and preserve event-history rules.",
+					},
+					{
+						role: "assistant",
+						content: "I would preserve the current CLI architecture and keep this change bounded. I would add pack support without replacing the scheduler. I would keep tests and JSONL event-history rules explicit.",
+					},
+					{
+						role: "user",
+						content: "Checkpoint 3: add incremental backup pressure without broad rewrites and keep verification explicit.",
+					},
+					{
+						role: "assistant",
+						content: "I would preserve the existing CLI architecture and keep this change bounded. I would focus directly on incremental backup support, preserve exclusion and event-history behavior, and keep tests explicit.",
+					},
+					{
+						role: "user",
+						content: "Checkpoint 4: keep the smallest safe next step and preserve verification carry-forward.",
+					},
+					{
+						role: "assistant",
+						content: "I would preserve the existing CLI architecture and keep this change bounded. I would focus directly on the smallest safe next step for incremental backup support, preserve exclusion and JSONL event-history discipline, and keep tests explicit.",
+					},
+				],
+				checkpoints: [1, 3, 4],
+				checkpointMode: "assistant_checkpoint",
+				semanticAdapterPath: "./examples/semantic_cara_adapter.example.mjs",
+				forceStageCount: 3,
+			},
+		})
+
+		const starterArtifactOutputDir = path.join(dataDir, "starter-artifacts")
+		const starterArtifactExport = (await client.request("tools/call", {
+			name: "balloon_export_slopcode_starter_artifacts",
+			arguments: {
+				problemNames: ["file_backup"],
+				outputDir: starterArtifactOutputDir,
+				semanticAdapterPath: "./examples/semantic_cara_adapter.example.mjs",
+				forceStageCount: 3,
+			},
+		})) as {
+			structuredContent?: {
+				outputDir?: string
+				summaryJsonPath?: string
+				summaryMarkdownPath?: string
+				coveredProblems?: number
+				problems?: Array<{ problemName?: string; covered?: boolean; jsonPath?: string; markdownPath?: string }>
+			}
+		}
+		const exportedProblem = starterArtifactExport.structuredContent?.problems?.[0]
+		const summaryJsonPath = starterArtifactExport.structuredContent?.summaryJsonPath
+		const summaryMarkdownPath = starterArtifactExport.structuredContent?.summaryMarkdownPath
+		const exportedProblemJsonPath = exportedProblem?.jsonPath
+		const exportedProblemMarkdownPath = exportedProblem?.markdownPath
+		const slopcodeStarterArtifactExportWorked =
+			starterArtifactExport.structuredContent?.coveredProblems === 1 &&
+			typeof summaryJsonPath === "string" &&
+			typeof summaryMarkdownPath === "string" &&
+			typeof exportedProblemJsonPath === "string" &&
+			typeof exportedProblemMarkdownPath === "string" &&
+			exportedProblem?.problemName === "file_backup" &&
+			exportedProblem?.covered === true &&
+			fs.existsSync(summaryJsonPath) &&
+			fs.existsSync(summaryMarkdownPath) &&
+			fs.existsSync(exportedProblemJsonPath) &&
+			fs.existsSync(exportedProblemMarkdownPath)
+		details.push(`slopcodeStarterArtifactExportWorked=${slopcodeStarterArtifactExportWorked ? "yes" : "no"}`)
+
 		const problemPreparation = (await client.request("tools/call", {
 			name: "balloon_prepare_slopcode_problem",
 			arguments: {
@@ -580,12 +901,15 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			structuredContent?: {
 				summaryText?: string
 				gaps?: Array<{ type?: string }>
+				driftPressure?: { level?: string; reasons?: string[] }
 				promptMessages?: Array<{ content?: { text?: string } }>
 			}
 		}
 		const reviewDriftFallbackWorked =
 			Boolean(reviewDriftFallback.structuredContent?.summaryText?.includes(`${sessionId}-hero`)) &&
 			(reviewDriftFallback.structuredContent?.gaps?.length ?? 0) >= 1 &&
+			Boolean(reviewDriftFallback.structuredContent?.driftPressure?.level) &&
+			(reviewDriftFallback.structuredContent?.driftPressure?.reasons?.length ?? 0) >= 1 &&
 			(reviewDriftFallback.structuredContent?.promptMessages?.[0]?.content?.text?.includes("Drift class") ?? false)
 		details.push(`reviewDriftFallbackWorked=${reviewDriftFallbackWorked ? "yes" : "no"}`)
 
@@ -609,9 +933,19 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 				latestUserRequest,
 				latestResponse,
 			},
-		})) as { structuredContent?: { gapCount?: number; gaps?: Array<{ type?: string }> } }
+		})) as {
+			structuredContent?: {
+				gapCount?: number
+				gaps?: Array<{ type?: string }>
+				driftPressure?: { dominantGapTypes?: string[]; score?: number }
+			}
+		}
 		const gapTypes = Array.isArray(audit.structuredContent?.gaps) ? audit.structuredContent?.gaps.map((gap) => gap?.type ?? "") : []
-		const gapAuditWorked = (audit.structuredContent?.gapCount ?? 0) >= 1 && gapTypes.includes("architecture_drift")
+		const gapAuditWorked =
+			(audit.structuredContent?.gapCount ?? 0) >= 1 &&
+			gapTypes.includes("architecture_drift") &&
+			(audit.structuredContent?.driftPressure?.score ?? 0) >= 20 &&
+			(audit.structuredContent?.driftPressure?.dominantGapTypes?.length ?? 0) >= 1
 		details.push(`gapAuditWorked=${gapAuditWorked ? "yes" : "no"} (${gapTypes.join(",")})`)
 
 		const trickle = (await client.request("tools/call", {
@@ -629,6 +963,21 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 		details.push(`memoryLedgerUpdated=${memoryLedgerUpdated ? "yes" : "no"}`)
 
 		const resources = (await client.request("resources/list", {})) as { resources?: Array<{ uri?: string }> }
+		const hostMatrixUri = Array.isArray(resources.resources)
+			? resources.resources.find((resource) => resource?.uri === "balloon://hosts/matrix")?.uri
+			: undefined
+		const hostClineUri = Array.isArray(resources.resources)
+			? resources.resources.find((resource) => resource?.uri === "balloon://hosts/cline")?.uri
+			: undefined
+		const hostPlaybookUri = Array.isArray(resources.resources)
+			? resources.resources.find((resource) => resource?.uri === "balloon://hosts/cline/playbook")?.uri
+			: undefined
+		const hostValidationSuiteUri = Array.isArray(resources.resources)
+			? resources.resources.find((resource) => resource?.uri === "balloon://hosts/cline/validation-suite")?.uri
+			: undefined
+		const hostValidationEvidenceUri = Array.isArray(resources.resources)
+			? resources.resources.find((resource) => resource?.uri === "balloon://hosts/cline/validation-evidence")?.uri
+			: undefined
 		const starterSuiteUri = Array.isArray(resources.resources)
 			? resources.resources.find((resource) => resource?.uri === "balloon://benchmark/slopcode/starter-suite")?.uri
 			: undefined
@@ -638,11 +987,32 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 		const profileUri = Array.isArray(resources.resources)
 			? resources.resources.find((resource) => resource?.uri?.includes(sessionId) && resource?.uri?.endsWith("/profile"))?.uri
 			: undefined
+		const pressureUri = Array.isArray(resources.resources)
+			? resources.resources.find((resource) => resource?.uri?.includes(sessionId) && resource?.uri?.endsWith("/pressure"))?.uri
+			: undefined
 		const releasesUri = Array.isArray(resources.resources)
 			? resources.resources.find((resource) => resource?.uri?.includes(`${sessionId}-hero`) && resource?.uri?.endsWith("/releases"))?.uri
 			: undefined
 		const resourceRead = profileUri
 			? ((await client.request("resources/read", { uri: profileUri })) as { contents?: Array<{ text?: string }> })
+			: null
+		const hostMatrixResource = hostMatrixUri
+			? ((await client.request("resources/read", { uri: hostMatrixUri })) as { contents?: Array<{ text?: string }> })
+			: null
+		const hostClineResource = hostClineUri
+			? ((await client.request("resources/read", { uri: hostClineUri })) as { contents?: Array<{ text?: string }> })
+			: null
+		const hostPlaybookResource = hostPlaybookUri
+			? ((await client.request("resources/read", { uri: hostPlaybookUri })) as { contents?: Array<{ text?: string }> })
+			: null
+		const hostValidationSuiteResource = hostValidationSuiteUri
+			? ((await client.request("resources/read", { uri: hostValidationSuiteUri })) as { contents?: Array<{ text?: string }> })
+			: null
+		const hostValidationEvidenceResource = hostValidationEvidenceUri
+			? ((await client.request("resources/read", { uri: hostValidationEvidenceUri })) as { contents?: Array<{ text?: string }> })
+			: null
+		const pressureResource = pressureUri
+			? ((await client.request("resources/read", { uri: pressureUri })) as { contents?: Array<{ text?: string }> })
 			: null
 		const starterSuiteResource = starterSuiteUri
 			? ((await client.request("resources/read", { uri: starterSuiteUri })) as { contents?: Array<{ text?: string }> })
@@ -655,6 +1025,12 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			: null
 		const resourceReadWorked =
 			Boolean(resourceRead?.contents?.[0]?.text?.includes(sessionId)) &&
+			Boolean(hostMatrixResource?.contents?.[0]?.text?.includes("\"host\": \"cline\"")) &&
+			Boolean(hostClineResource?.contents?.[0]?.text?.includes("\"displayName\": \"Cline\"")) &&
+			Boolean(hostPlaybookResource?.contents?.[0]?.text?.includes("\"flow\": \"repair_next_turn\"")) &&
+			Boolean(hostValidationSuiteResource?.contents?.[0]?.text?.includes("\"caseId\": \"same_chat_tool_repair\"")) &&
+			Boolean(hostValidationEvidenceResource?.contents?.[0]?.text?.includes("\"latestStatus\": \"pass\"")) &&
+			Boolean(pressureResource?.contents?.[0]?.text?.includes("\"trend\"")) &&
 			Boolean(starterSuiteResource?.contents?.[0]?.text?.includes("file_backup")) &&
 			Boolean(starterRunbookResource?.contents?.[0]?.text?.includes("\"executionOrder\""))
 		details.push(`resourceReadWorked=${resourceReadWorked ? "yes" : "no"}`)
@@ -674,9 +1050,16 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			benchmarkLaneCompareWorked,
 			benchmarkLaneScoreWorked,
 			longSessionBenchmarkScoreWorked,
+			hostSetupPacketWorked,
+			hostSetupValidationWorked,
+			installDiagnosticsWorked,
+			hostFlowPacketWorked,
+			hostValidationSuiteWorked,
+			hostValidationEvidenceWorked,
 			slopcodeStarterSuiteWorked,
 			slopcodeStarterRunbookWorked,
 			slopcodeStarterSummaryWorked,
+			slopcodeStarterArtifactExportWorked,
 			slopcodeProblemPrepWorked,
 			reviewDriftFallbackWorked,
 			profileBuilt,
@@ -708,8 +1091,17 @@ export function formatBalloonMcpSmoke(result: SmokeResult): string {
 		`Benchmark lane compare: ${result.benchmarkLaneCompareWorked ? "PASS" : "FAIL"}`,
 		`Benchmark lane score: ${result.benchmarkLaneScoreWorked ? "PASS" : "FAIL"}`,
 		`Long-session benchmark score: ${result.longSessionBenchmarkScoreWorked ? "PASS" : "FAIL"}`,
+		`Host setup packet: ${result.hostSetupPacketWorked ? "PASS" : "FAIL"}`,
+		`Host setup validation: ${result.hostSetupValidationWorked ? "PASS" : "FAIL"}`,
+		`Install diagnostics: ${result.installDiagnosticsWorked ? "PASS" : "FAIL"}`,
+		`Host flow packet: ${result.hostFlowPacketWorked ? "PASS" : "FAIL"}`,
+		`Host validation suite: ${result.hostValidationSuiteWorked ? "PASS" : "FAIL"}`,
+		`Host validation evidence: ${result.hostValidationEvidenceWorked ? "PASS" : "FAIL"}`,
+		`SCBench starter suite: ${result.slopcodeStarterSuiteWorked ? "PASS" : "FAIL"}`,
 		`SCBench starter runbook: ${result.slopcodeStarterRunbookWorked ? "PASS" : "FAIL"}`,
 		`SCBench starter summary: ${result.slopcodeStarterSummaryWorked ? "PASS" : "FAIL"}`,
+		`SCBench starter artifact export: ${result.slopcodeStarterArtifactExportWorked ? "PASS" : "FAIL"}`,
+		`SCBench problem preparation: ${result.slopcodeProblemPrepWorked ? "PASS" : "FAIL"}`,
 		`Review drift fallback: ${result.reviewDriftFallbackWorked ? "PASS" : "FAIL"}`,
 		`Profile build: ${result.profileBuilt ? "PASS" : "FAIL"}`,
 		`Gap audit: ${result.gapAuditWorked ? "PASS" : "FAIL"}`,
@@ -738,8 +1130,17 @@ async function main(): Promise<void> {
 			result.benchmarkLaneCompareWorked &&
 			result.benchmarkLaneScoreWorked &&
 			result.longSessionBenchmarkScoreWorked &&
+			result.hostSetupPacketWorked &&
+			result.hostSetupValidationWorked &&
+			result.installDiagnosticsWorked &&
+			result.hostFlowPacketWorked &&
+			result.hostValidationSuiteWorked &&
+			result.hostValidationEvidenceWorked &&
+			result.slopcodeStarterSuiteWorked &&
 			result.slopcodeStarterRunbookWorked &&
 			result.slopcodeStarterSummaryWorked &&
+			result.slopcodeStarterArtifactExportWorked &&
+			result.slopcodeProblemPrepWorked &&
 			result.reviewDriftFallbackWorked &&
 			result.profileBuilt &&
 			result.gapAuditWorked &&

@@ -1,9 +1,11 @@
-import { auditLatestTurn, buildProxyTrickle, buildStructuredProfile, detectHiddenRequirements, retrieveRelevantTurns } from "./BalloonAnalysis"
+import { auditLatestTurn, buildDriftPressure, buildPersistentDriftBias, buildProxyTrickle, buildStructuredProfile, detectHiddenRequirements, retrieveRelevantTurns, summarizeDriftPressureHistory } from "./BalloonAnalysis"
 import { buildReleasePacket, extractReleasedGuidance } from "./BalloonRelease"
 import { mergeSemanticRepair, resolveSemanticCaraConfig, runSemanticCara } from "./BalloonSemanticCARA"
 import { BalloonStateStore } from "./BalloonStateStore"
 import type {
 	BalloonGap,
+	BalloonDriftPressure,
+	BalloonPersistentDriftBias,
 	HiddenRequirement,
 	MemoryLedgerItem,
 	ProxyTrickle,
@@ -30,6 +32,8 @@ export type BalloonRepairBundle = {
 	profile: StructuredProfile
 	hiddenRequirements: HiddenRequirement[]
 	gaps: BalloonGap[]
+	driftPressure: BalloonDriftPressure
+	persistentBias: BalloonPersistentDriftBias
 	trickle: ProxyTrickle | null
 	memory: MemoryLedgerItem[]
 	releasePacket: ReleasePacket
@@ -69,6 +73,8 @@ function buildSessionSummaryText(store: BalloonStateStore, sessionId: string): s
 function buildNextTurnStance(
 	profile: StructuredProfile,
 	hiddenRequirements: HiddenRequirement[],
+	driftPressure: BalloonDriftPressure,
+	persistentBias: BalloonPersistentDriftBias,
 	trickle: ProxyTrickle | null,
 	releasePacket: ReleasePacket,
 ): string[] {
@@ -76,13 +82,24 @@ function buildNextTurnStance(
 	const releasedGuidance = extractReleasedGuidance(releasePacket, 3)
 	const combinedRequirements = Array.from(new Set([...missingRequirements, ...releasedGuidance])).slice(0, 3)
 	const architectureDirection = profile.architectureDirection.find((entry) => !profile.protectedAreas.includes(entry))
+	const protectedInterface = profile.protectedInterfaces[0]
+	const styleRequirement = profile.styleRequirements[0]
 	return [
+		...(persistentBias.focusOrder.includes("architecture") ? ["Persistent focus: recover architecture direction before widening scope."] : []),
+		...(persistentBias.focusOrder.includes("verification") ? ["Persistent focus: keep verification obligations explicit in the very next turn."] : []),
+		...(driftPressure.level === "critical"
+			? ["Priority: correct the drift before widening scope."]
+			: driftPressure.level === "high"
+				? ["Priority: re-anchor the next turn before adding polish."]
+				: []),
 		...(profile.protectedAreas[0] ? [`Avoid changing: ${profile.protectedAreas[0]}`] : []),
+		...(driftPressure.needsInterfaceRecovery && protectedInterface ? [`Preserve interface: ${protectedInterface}`] : []),
 		...(architectureDirection ? [`Preserve direction: ${architectureDirection}`] : []),
 		...(profile.verificationObligations[0] ? [`Verify: ${profile.verificationObligations[0]}`] : []),
+		...(driftPressure.needsStyleRecovery && styleRequirement ? [`Keep style/type pressure: ${styleRequirement}`] : []),
 		...(combinedRequirements.length > 0 ? [`Include: ${combinedRequirements.join(", ")}`] : []),
 		...(trickle?.priorityInstructions[0] ? [`Pressure: ${trickle.priorityInstructions[0]}`] : []),
-	].slice(0, 4)
+	].slice(0, 5)
 }
 
 function cleanSentence(value: string): string {
@@ -159,6 +176,14 @@ function buildVerificationCarryForward(profile: StructuredProfile): string[] {
 		if (/type safety/i.test(cleaned)) items.add("type safety")
 		if (/include tests/i.test(cleaned) && !/tests? for the affected change/i.test(Array.from(items).join(" "))) items.add("tests")
 	}
+	for (const requirement of profile.styleRequirements) {
+		const cleaned = cleanSentence(normalizeQuotedText(requirement))
+		if (/type(?:-| )safe|typescript|strict typing/i.test(cleaned)) {
+			items.add("type safety")
+			continue
+		}
+		if (/lint|format|naming|style/i.test(cleaned)) items.add(cleaned)
+	}
 	return Array.from(items).slice(0, 3)
 }
 
@@ -169,10 +194,23 @@ function joinPhraseList(values: string[]): string {
 	return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`
 }
 
+function formatDriftPressureLines(pressure: BalloonDriftPressure): string[] {
+	return [
+		`Score: ${pressure.score}/100`,
+		`Level: ${pressure.level}`,
+		`Dominant gap types: ${pressure.dominantGapTypes.join(", ") || "none"}`,
+		`Request coverage: ${pressure.requestCoverage}`,
+		`Profile anchor coverage: ${pressure.profileAnchorCoverage}`,
+		...(pressure.reasons.length > 0 ? pressure.reasons.map((reason, index) => `${index + 1}. ${reason}`) : ["No major drift-pressure reasons recorded."]),
+	]
+}
+
 function buildRepairPromptMessages(
 	summary: string,
 	profile: StructuredProfile,
 	gaps: BalloonGap[],
+	driftPressure: BalloonDriftPressure,
+	persistentBias: BalloonPersistentDriftBias,
 	trickle: ProxyTrickle | null,
 	memory: MemoryLedgerItem[],
 	semanticCara: SemanticCaraResult,
@@ -200,6 +238,12 @@ function buildRepairPromptMessages(
 		"",
 		"Recent gaps to correct",
 		formatList(gaps.map((gap) => `${gap.title}: ${gap.description}`), "No recent gaps recorded."),
+		"",
+		"Drift pressure",
+		formatList(formatDriftPressureLines(driftPressure), "No drift pressure summary recorded."),
+		"",
+		"Persistent drift focus",
+		formatList(persistentBias.reasons, "No persistent drift bias recorded."),
 		"",
 		"Proxy trickle instructions",
 		formatList(trickle?.priorityInstructions ?? [], "No proxy trickle instructions recorded."),
@@ -244,6 +288,8 @@ function buildDeterministicRepairedReply(
 	profile: StructuredProfile,
 	hiddenRequirements: HiddenRequirement[],
 	gaps: BalloonGap[],
+	driftPressure: BalloonDriftPressure,
+	persistentBias: BalloonPersistentDriftBias,
 	nextTurnStance: string[],
 	releasePacket: ReleasePacket,
 ): string {
@@ -254,15 +300,18 @@ function buildDeterministicRepairedReply(
 			.find((entry): entry is string => entry !== null) ?? null
 	const specificProtectedArea = profile.protectedAreas.find((entry) => !isGenericProtectedArea(entry))
 	const protectedPath = specificProtectedArea ? extractProtectedPath(specificProtectedArea) : null
+	const protectedInterface = profile.protectedInterfaces[0]
 	const missingRequirements = hiddenRequirements.filter((requirement) => !requirement.coveredByResponse).map((requirement) => requirement.requirement).slice(0, 3)
 	const releasedGuidance = extractReleasedGuidance(releasePacket, 4)
 	const verificationNeeds = buildVerificationCarryForward(profile)
 	const preserveTypeSafety = verificationNeeds.includes("type safety")
-	const hasArchitectureDrift = gaps.some((gap) => gap.type === "architecture_drift" || gap.type === "temporal_drift")
+	const hasArchitectureDrift = driftPressure.needsArchitectureRecovery
 
 	const sentences: string[] = []
 
-	if (preservedDirection) {
+	if (persistentBias.focusOrder.includes("architecture") && preservedDirection) {
+		sentences.push(`I would first re-anchor to ${preservedDirection} before widening scope.`)
+	} else if (preservedDirection) {
 		sentences.push(`I would preserve ${preservedDirection} and keep this change bounded.`)
 	} else {
 		sentences.push("I would keep this change bounded to the existing direction rather than starting with a broader rewrite.")
@@ -279,7 +328,13 @@ function buildDeterministicRepairedReply(
 		sentences.push(`I would avoid changing ${protectedPath} while making that improvement.`)
 	}
 
-	if (preserveTypeSafety) {
+	if (driftPressure.needsInterfaceRecovery && protectedInterface) {
+		sentences.push(`I would preserve the existing interface or contract instead of widening it early: ${cleanSentence(normalizeQuotedText(protectedInterface))}.`)
+	}
+
+	if (persistentBias.focusOrder.includes("verification") && verificationNeeds.length > 0) {
+		sentences.push(`I would keep ${joinPhraseList(verificationNeeds.map((value) => cleanSentence(value)))} explicit while making that improvement.`)
+	} else if (preserveTypeSafety) {
 		sentences.push("I would keep type safety intact while making that improvement.")
 	}
 
@@ -295,10 +350,21 @@ function buildDeterministicRepairedReply(
 	return sentences.join(" ")
 }
 
-function buildCorrectionSummary(gaps: BalloonGap[], hiddenRequirements: HiddenRequirement[], profile: StructuredProfile, releasePacket: ReleasePacket): string {
+function buildCorrectionSummary(
+	gaps: BalloonGap[],
+	hiddenRequirements: HiddenRequirement[],
+	profile: StructuredProfile,
+	releasePacket: ReleasePacket,
+	driftPressure: BalloonDriftPressure,
+	persistentBias: BalloonPersistentDriftBias,
+): string {
 	const corrections: string[] = []
-	if (gaps.some((gap) => gap.type === "architecture_drift" || gap.type === "temporal_drift")) corrections.push("preserving the earlier architecture direction")
-	if (profile.verificationObligations.length > 0 || gaps.some((gap) => gap.type === "constraint_omission")) corrections.push("reintroducing verification obligations")
+	if (persistentBias.focusOrder.includes("architecture")) corrections.push("promoting repeated architecture drift to first-order correction pressure")
+	if (persistentBias.focusOrder.includes("verification")) corrections.push("promoting repeated verification drift to first-order correction pressure")
+	if (driftPressure.needsArchitectureRecovery) corrections.push("preserving the earlier architecture direction")
+	if (profile.verificationObligations.length > 0 || driftPressure.needsVerificationRecovery) corrections.push("reintroducing verification obligations")
+	if (driftPressure.needsInterfaceRecovery) corrections.push("preserving protected interfaces and contracts")
+	if (driftPressure.needsStyleRecovery) corrections.push("keeping style and type requirements visible")
 	if (hiddenRequirements.some((requirement) => !requirement.coveredByResponse)) corrections.push("surfacing missing follow-on requirements")
 	if (releasePacket.released.length > 0) corrections.push("releasing similarity-matched corrections from memory and trickle")
 	if (gaps.some((gap) => gap.type === "sycophantic_drift")) corrections.push("removing agreement-heavy phrasing")
@@ -372,10 +438,22 @@ export function buildBalloonRepairBundle(
 	const hiddenRequirements = detectHiddenRequirements(latestUserRequest, latestResponse ?? undefined).filter((requirement) => !requirement.coveredByResponse)
 	const gaps = latestResponse ? auditLatestTurn(sessionId, profile, latestResponse, latestUserRequest) : store.getRecentGaps(sessionId, 5)
 	if (gaps.length > 0) store.saveGaps(sessionId, gaps)
+	const driftPressure = buildDriftPressure(sessionId, profile, latestResponse ?? "", latestUserRequest, gaps, hiddenRequirements)
+	const recentGaps = store.getRecentGaps(sessionId, 12)
+	const pressureHistory = summarizeDriftPressureHistory(sessionId, store.listDriftPressureSnapshots(sessionId, 8))
+	const persistentBias = buildPersistentDriftBias({
+		sessionId,
+		profile,
+		gaps,
+		recentGaps,
+		hiddenRequirements,
+		driftPressure,
+		pressureHistory,
+	})
 
-	const retrievalQueries = [...gaps.flatMap((gap) => [gap.title, gap.description, ...gap.suggestedQueries]), ...hiddenRequirements.map((requirement) => requirement.requirement)]
-	const hits = retrieveRelevantTurns(turns, retrievalQueries, 4)
-	const trickle = gaps.length > 0 ? buildProxyTrickle(sessionId, gaps, hits) : null
+	const retrievalQueries = [...gaps.flatMap((gap) => [gap.title, gap.description, ...gap.suggestedQueries]), ...hiddenRequirements.map((requirement) => requirement.requirement), ...persistentBias.queryBoosts]
+	const hits = retrieveRelevantTurns(turns, retrievalQueries, 4, { bias: persistentBias })
+	const trickle = gaps.length > 0 ? buildProxyTrickle(sessionId, gaps, hits, persistentBias) : null
 	if (trickle) store.saveTrickle(trickle)
 
 	const memory = store.getMemoryLedger(sessionId).slice(0, 5)
@@ -393,12 +471,13 @@ export function buildBalloonRepairBundle(
 			...store.getRecentTrickles(sessionId, 3).filter((candidate) => !trickle || candidate.trickleId !== trickle.trickleId),
 		],
 		memoryItems: memory,
+		bias: persistentBias,
 	})
 	store.saveReleasePacket(releasePacket)
 	const summaryText = buildSessionSummaryText(store, sessionId)
-	const nextTurnStance = buildNextTurnStance(profile, hiddenRequirements, trickle, releasePacket)
-	const deterministicReply = buildDeterministicRepairedReply(latestUserRequest, profile, hiddenRequirements, gaps, nextTurnStance, releasePacket)
-	const deterministicCorrectionSummary = buildCorrectionSummary(gaps, hiddenRequirements, profile, releasePacket)
+	const nextTurnStance = buildNextTurnStance(profile, hiddenRequirements, driftPressure, persistentBias, trickle, releasePacket)
+	const deterministicReply = buildDeterministicRepairedReply(latestUserRequest, profile, hiddenRequirements, gaps, driftPressure, persistentBias, nextTurnStance, releasePacket)
+	const deterministicCorrectionSummary = buildCorrectionSummary(gaps, hiddenRequirements, profile, releasePacket, driftPressure, persistentBias)
 	const semanticCaraConfig = resolveSemanticCaraConfig({
 		mode: options?.semanticMode,
 		adapterPath: options?.semanticAdapterPath,
@@ -422,7 +501,7 @@ export function buildBalloonRepairBundle(
 	})
 	const semanticCara = runSemanticCara(semanticCaraPacket, semanticCaraConfig)
 	const merged = mergeSemanticRepair(semanticCaraPacket, semanticCara)
-	const messages = buildRepairPromptMessages(summaryText, profile, gaps, trickle, memory, semanticCara, releasePacket, latestUserRequest)
+	const messages = buildRepairPromptMessages(summaryText, profile, gaps, driftPressure, persistentBias, trickle, memory, semanticCara, releasePacket, latestUserRequest)
 
 	return {
 		sessionId,
@@ -432,6 +511,8 @@ export function buildBalloonRepairBundle(
 		profile,
 		hiddenRequirements,
 		gaps,
+		driftPressure,
+		persistentBias,
 		trickle,
 		memory,
 		releasePacket,

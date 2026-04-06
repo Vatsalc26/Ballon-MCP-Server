@@ -62,6 +62,16 @@ For other hosts:
 2. Roo Code starting config: [../examples/roo_mcp.example.json](../examples/roo_mcp.example.json)
 3. Claude Desktop-style starting config: [../examples/claude_desktop_config.example.json](../examples/claude_desktop_config.example.json)
 
+If you want Balloon to generate a ready-to-paste config snippet first, use:
+
+1. `balloon_prepare_host_setup_packet`
+2. `balloon_validate_host_setup`
+3. `balloon_run_install_diagnostics`
+4. `balloon_prepare_host_flow_packet`
+5. `balloon_prepare_host_validation_suite`
+6. `balloon_summarize_host_validation_results`
+7. `balloon://hosts/matrix`
+
 Host notes:
 
 1. [HOST_COMPATIBILITY.md](./HOST_COMPATIBILITY.md)
@@ -92,6 +102,16 @@ Recommended test flow:
 If the server starts but tools do not appear, use the MCP output log in VS Code to inspect errors.
 
 If a chat tab was already open before the server became healthy, prefer starting a fresh chat or running `MCP: Reset Cached Tools` before testing. Older chat tabs can keep stale MCP state.
+
+If you want Balloon to check your config after editing `.vscode/mcp.json`, run `balloon_validate_host_setup` with `host: vscode` and either `configPath` or `configJson`.
+
+If you want a stricter install-doctor pass, run `balloon_run_install_diagnostics` with `host: vscode` and your real `configPath`. It checks repo build health, tool/prompt/resource readiness, and whether the config resolves to a real `start.js`.
+
+If you want Balloon to tell you the safest next host flow after install, run `balloon_prepare_host_flow_packet` with `flow: install_diagnostics`, then follow the recommended tool-first path it returns.
+
+If you want a structured same-chat vs fresh-chat validation runbook for the host, run `balloon_prepare_host_validation_suite` or read `balloon://hosts/{host}/validation-suite`.
+
+If you want to keep a real ledger of what actually passed or failed in the host, use `balloon_record_host_validation_result` after a run, then `balloon_summarize_host_validation_results` or `balloon://hosts/{host}/validation-evidence`.
 
 Use the built-in VS Code Chat first. You do not need Cline for the first host test.
 
@@ -126,13 +146,24 @@ If the install path still depends on extra verbal guidance, the public surface i
 5. `balloon_compare_repair_lanes`
 6. `balloon_run_staged_cycle`
 7. `balloon_compare_benchmark_lanes`
-8. `balloon_run_long_session_benchmark`
-9. `balloon_describe_slopcode_starter_suite`
-10. `balloon_prepare_slopcode_problem`
-11. `balloon_review_session_drift`
-12. `balloon://sessions/{sessionId}/gaps`
-13. `balloon://sessions/{sessionId}/releases`
-14. `balloon://benchmark/slopcode/starter-suite`
+8. `balloon_prepare_host_setup_packet`
+9. `balloon_validate_host_setup`
+10. `balloon_run_install_diagnostics`
+11. `balloon_prepare_host_flow_packet`
+12. `balloon_prepare_host_validation_suite`
+13. `balloon_record_host_validation_result`
+14. `balloon_summarize_host_validation_results`
+15. `balloon_run_long_session_benchmark`
+16. `balloon_describe_slopcode_starter_suite`
+17. `balloon_prepare_slopcode_problem`
+18. `balloon_review_session_drift`
+19. `balloon://hosts/matrix`
+20. `balloon://hosts/{host}/playbook`
+21. `balloon://hosts/{host}/validation-suite`
+22. `balloon://hosts/{host}/validation-evidence`
+23. `balloon://sessions/{sessionId}/gaps`
+24. `balloon://sessions/{sessionId}/releases`
+25. `balloon://benchmark/slopcode/starter-suite`
 
 If prompt invocation is inconsistent in your MCP host, prefer `balloon_repair_next_turn` for repeatable demos and benchmark runs.
 

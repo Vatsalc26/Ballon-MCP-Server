@@ -230,6 +230,7 @@ function buildSuggestedLongSessionPrompt(preparation: SlopCodeProblemPreparation
 		"",
 		`- sessionId: ${preparation.recommendedSessionId}`,
 		`- checkpoints: [${preparation.entry.recommendedCheckpointBatch.join(", ")}]`,
+		`- checkpointMode: ${preparation.recommendedCheckpointMode}`,
 		"- semanticAdapterPath: .\\examples\\semantic_cara_adapter.example.mjs",
 		`- forceStageCount: ${preparation.entry.recommendedForceStageCount}`,
 		`- stageThresholds: [${preparation.entry.recommendedLongSessionThresholds.join(", ")}]`,
@@ -264,9 +265,11 @@ export function buildSlopCodeProblemPreparation(problemName: string, requestedRo
 		...checkpointFiles.filter((file) => !file.exists && file.path).map((file) => file.path as string),
 	]
 	const recommendedSessionId = `scbench-${entry.problemName.replace(/_/gu, "-")}`
+	const recommendedCheckpointMode: SlopCodeProblemPreparation["recommendedCheckpointMode"] = "assistant_checkpoint"
 	const recommendedInstructions = [
 		`Use checkpoint_1 through checkpoint_${entry.checkpointCount} in order; do not skip the opening checkpoint when building the session.`,
 		`Score at least checkpoints ${entry.recommendedCheckpointBatch.join(", ")} so you see both the opening shape and the later erosion pressure.`,
+		"Interpret those checkpoint numbers as SCBench checkpoint ordinals, not raw turn counts.",
 		`For short checkpoint comparisons, force all ${entry.recommendedForceStageCount} staged Balloon families active so the external prototype stays visible.`,
 		`If you stretch the problem into a longer chat, start staged thresholds at ${entry.recommendedLongSessionThresholds.join(" / ")} and only tighten them after real reruns.`,
 		"Capture whether Balloon preserves bounded next steps, protected areas, and verification obligations better than the baseline lane.",
@@ -296,6 +299,7 @@ export function buildSlopCodeProblemPreparation(problemName: string, requestedRo
 		checkpointFiles,
 		missingFiles,
 		recommendedSessionId,
+		recommendedCheckpointMode,
 		recommendedInstructions,
 		suggestedCompareBenchmarkPrompt,
 	}
@@ -309,6 +313,7 @@ function buildProblemPlan(entry: SlopCodeStarterSuiteEntry, requestedRoot?: stri
 		category: entry.category,
 		difficulty: entry.difficulty,
 		recommendedSessionId,
+		recommendedCheckpointMode: preparation?.recommendedCheckpointMode ?? "assistant_checkpoint",
 		recommendedCheckpointBatch: [...entry.recommendedCheckpointBatch],
 		recommendedForceStageCount: entry.recommendedForceStageCount,
 		recommendedLongSessionThresholds: [...entry.recommendedLongSessionThresholds],
@@ -333,7 +338,7 @@ function buildProblemPlan(entry: SlopCodeStarterSuiteEntry, requestedRoot?: stri
 		suggestedLongSessionPrompt:
 			preparation
 				? buildSuggestedLongSessionPrompt(preparation)
-				: `Use #balloon_run_long_session_benchmark with sessionId ${recommendedSessionId} and stageThresholds [${entry.recommendedLongSessionThresholds.join(", ")}].`,
+				: `Use #balloon_run_long_session_benchmark with sessionId ${recommendedSessionId}, checkpointMode assistant_checkpoint, and stageThresholds [${entry.recommendedLongSessionThresholds.join(", ")}].`,
 	}
 }
 

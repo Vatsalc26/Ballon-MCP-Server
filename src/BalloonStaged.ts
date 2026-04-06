@@ -1,8 +1,8 @@
-import { buildProxyTrickle, retrieveRelevantTurns } from "./BalloonAnalysis"
+import { buildProxyTrickle, summarizeDriftPressureHistory, retrieveRelevantTurns } from "./BalloonAnalysis"
 import { buildBalloonRepairBundle, type BalloonRepairBundle } from "./BalloonRepair"
 import { extractReleasedGuidance } from "./BalloonRelease"
 import { BalloonStateStore } from "./BalloonStateStore"
-import type { BalloonGap, ReleasePacket, RetrievalHit, StagedBalloonResult, StagedBalloonStage, StagedBalloonStageId } from "./types"
+import type { BalloonDriftPressureSnapshot, BalloonGap, ReleasePacket, RetrievalHit, StagedBalloonResult, StagedBalloonStage, StagedBalloonStageId } from "./types"
 
 type StagedCycleOptions = {
 	userRequest?: string
@@ -221,12 +221,29 @@ function buildSmallestSafeNextStep(
 	return `The smallest safe next step is to ${joinActionClauses(clauses)}.`
 }
 
-function buildStageActivationSignals(bundle: BalloonRepairBundle, releasePacket: ReleasePacket, persistentGaps: BalloonGap[]): StageActivationSignals {
+function buildStageActivationSignals(
+	bundle: BalloonRepairBundle,
+	releasePacket: ReleasePacket,
+	persistentGaps: BalloonGap[],
+	recentPressureSnapshots: BalloonDriftPressureSnapshot[],
+): StageActivationSignals {
 	const highSignalGaps = bundle.gaps.filter((gap) => gap.severity === "high" || gap.type === "architecture_drift" || gap.type === "profile_contradiction").length
 	const persistentHighSignal = persistentGaps.filter((gap) => gap.severity === "high" || gap.type === "architecture_drift" || gap.type === "profile_contradiction").length
+	const pressureHistory = summarizeDriftPressureHistory(bundle.sessionId, recentPressureSnapshots)
+	const sustainedPressure =
+		(pressureHistory.latestScore ?? 0) >= 55 ||
+		(pressureHistory.averageScore ?? 0) >= 45 ||
+		pressureHistory.trend === "rising"
 	return {
-		mid: highSignalGaps >= 1 || bundle.hiddenRequirements.length >= 2 || bundle.gaps.length >= 4,
-		deep: persistentHighSignal >= 1 || persistentGaps.length >= 2 || releasePacket.released.length >= 3,
+		mid: bundle.driftPressure.score >= 35 || sustainedPressure || highSignalGaps >= 1 || bundle.hiddenRequirements.length >= 2 || bundle.gaps.length >= 4,
+		deep:
+			bundle.driftPressure.score >= 65 ||
+			bundle.driftPressure.level === "critical" ||
+			sustainedPressure ||
+			persistentHighSignal >= 1 ||
+			persistentGaps.length >= 2 ||
+			releasePacket.released.length >= 3 ||
+			(bundle.driftPressure.requestCoverage === "weak" && bundle.driftPressure.profileAnchorCoverage !== "strong"),
 	}
 }
 
@@ -303,7 +320,7 @@ function buildMidStage(bundle: BalloonRepairBundle, retrievalHits: RetrievalHit[
 	if (!decision.active) {
 		return buildStage("mid", "Mid Balloon", false, decision.reason)
 	}
-	const trickle = bundle.gaps.length > 0 ? buildProxyTrickle(bundle.sessionId, bundle.gaps, retrievalHits) : bundle.trickle
+	const trickle = bundle.gaps.length > 0 ? buildProxyTrickle(bundle.sessionId, bundle.gaps, retrievalHits, bundle.persistentBias) : bundle.trickle
 	return buildStage("mid", "Mid Balloon", true, decision.reason, {
 		gaps: bundle.gaps.filter((gap) => gap.severity !== "low"),
 		hiddenRequirements: bundle.hiddenRequirements,
@@ -351,10 +368,12 @@ export function buildStagedBalloonResult(store: BalloonStateStore, sessionId: st
 		...bundle.gaps.flatMap((gap) => [gap.title, gap.description, ...gap.suggestedQueries]),
 		...bundle.hiddenRequirements.map((requirement) => requirement.requirement),
 		...bundle.nextTurnStance,
+		...bundle.persistentBias.queryBoosts,
 	]
-	const retrievalHits = retrieveRelevantTurns(turns, retrievalQueries, 5)
+	const retrievalHits = retrieveRelevantTurns(turns, retrievalQueries, 5, { bias: bundle.persistentBias })
 	const persistentGaps = buildPersistentGaps(store, sessionId)
-	const activationSignals = buildStageActivationSignals(bundle, bundle.releasePacket, persistentGaps)
+	const recentPressureSnapshots = store.listDriftPressureSnapshots(sessionId, 6)
+	const activationSignals = buildStageActivationSignals(bundle, bundle.releasePacket, persistentGaps, recentPressureSnapshots)
 	const activationPlan = resolveStageActivationPlan(turns.length, thresholds, forcedStageCount, activationSignals)
 
 	const activeStages: StagedBalloonStage[] = []
@@ -371,6 +390,7 @@ export function buildStagedBalloonResult(store: BalloonStateStore, sessionId: st
 	const stagedCorrectionSummaryParts = [
 		"Balloon staged external prototype applied",
 		`${activeStages.length} active stage(s)`,
+		`drift pressure ${bundle.driftPressure.level} (${bundle.driftPressure.score}/100)`,
 		bundle.releasePacket.released.length > 0 ? `${bundle.releasePacket.released.length} similarity-gated release(s)` : "no released corrections",
 	]
 
@@ -380,6 +400,7 @@ export function buildStagedBalloonResult(store: BalloonStateStore, sessionId: st
 		thresholds,
 		forcedStageCount,
 		activeStageCount: activationPlan.activeStageCount,
+		driftPressure: bundle.driftPressure,
 		stages,
 		releasePacket: bundle.releasePacket,
 		deterministicReply: bundle.deterministicReply,

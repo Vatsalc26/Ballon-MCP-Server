@@ -44,6 +44,66 @@ export interface BalloonGap {
 	createdAt: string
 }
 
+export type BalloonCoverageQuality = "weak" | "partial" | "strong"
+
+export type BalloonDriftPressureLevel = "low" | "guarded" | "high" | "critical"
+
+export interface BalloonDriftPressure {
+	sessionId: string
+	score: number
+	level: BalloonDriftPressureLevel
+	gapCount: number
+	highSeverityGapCount: number
+	dominantGapTypes: BalloonGapType[]
+	requestCoverage: BalloonCoverageQuality
+	profileAnchorCoverage: BalloonCoverageQuality
+	needsArchitectureRecovery: boolean
+	needsVerificationRecovery: boolean
+	needsProtectedAreaRecovery: boolean
+	needsInterfaceRecovery: boolean
+	needsStyleRecovery: boolean
+	needsHiddenRequirementRecovery: boolean
+	reasons: string[]
+}
+
+export type BalloonDriftPressureSource = "run_cycle" | "audit_turn" | "repair_packet" | "staged_cycle" | "review"
+
+export interface BalloonDriftPressureSnapshot {
+	snapshotId: string
+	sessionId: string
+	source: BalloonDriftPressureSource
+	turnCount: number
+	requestText: string | null
+	latestResponse: string | null
+	recordedAt: string
+	pressure: BalloonDriftPressure
+}
+
+export type BalloonDriftTrend = "insufficient_data" | "stable" | "rising" | "falling" | "mixed"
+
+export interface BalloonDriftPressureHistorySummary {
+	sessionId: string
+	totalSnapshots: number
+	latestScore: number | null
+	latestLevel: BalloonDriftPressureLevel | null
+	peakScore: number | null
+	averageScore: number | null
+	trend: BalloonDriftTrend
+	reasons: string[]
+	recentSnapshots: BalloonDriftPressureSnapshot[]
+}
+
+export type BalloonPersistentDriftFocus = "request_reanchor" | "architecture" | "verification" | "protected_area" | "interface" | "style" | "hidden_requirement"
+
+export interface BalloonPersistentDriftBias {
+	sessionId: string
+	focusOrder: BalloonPersistentDriftFocus[]
+	sustainedPressure: boolean
+	repeatedGapTypes: BalloonGapType[]
+	queryBoosts: string[]
+	reasons: string[]
+}
+
 export interface HiddenRequirement {
 	key: string
 	requirement: string
@@ -57,12 +117,14 @@ export interface RetrievalHit {
 	content: string
 	score: number
 	reasons: string[]
+	biasReasons: string[]
 }
 
 export interface ProxyTrickle {
 	trickleId: string
 	sessionId: string
 	summary: string
+	persistentFocus: BalloonPersistentDriftFocus[]
 	priorityInstructions: string[]
 	retrievalAnchors: string[]
 	provenance: string[]
@@ -90,6 +152,7 @@ export interface ReleasedCorrection {
 	similarityScore: number
 	threshold: number
 	matchedTerms: string[]
+	biasReasons: string[]
 	released: boolean
 	status?: MemoryLedgerItem["status"]
 	createdAt: string
@@ -99,6 +162,7 @@ export interface ReleasePacket {
 	packetId: string
 	sessionId: string
 	queryText: string
+	persistentFocus: BalloonPersistentDriftFocus[]
 	released: ReleasedCorrection[]
 	held: ReleasedCorrection[]
 	summary: string
@@ -127,6 +191,7 @@ export interface StagedBalloonResult {
 	thresholds: number[]
 	forcedStageCount: number | null
 	activeStageCount: number
+	driftPressure: BalloonDriftPressure
 	stages: StagedBalloonStage[]
 	releasePacket: ReleasePacket
 	deterministicReply: string
@@ -141,6 +206,7 @@ export interface BenchmarkLaneComparison {
 	latestResponse: string | null
 	baselineReply: string
 	deterministicReply: string
+	deterministicDriftPressure: BalloonDriftPressure
 	assistReply: string
 	stagedReply: string
 	deterministicCorrectionSummary: string
@@ -157,6 +223,8 @@ export interface BenchmarkLaneComparison {
 	stagedStages: StagedBalloonStage[]
 }
 
+export type LongSessionCheckpointMode = "turn_count" | "assistant_checkpoint"
+
 export interface LongSessionBenchmarkCheckpoint {
 	checkpoint: number
 	actualTurnCount: number
@@ -164,13 +232,16 @@ export interface LongSessionBenchmarkCheckpoint {
 	requestText: string
 	latestResponse: string | null
 	comparison: BenchmarkLaneComparison
+	driftPressure: BalloonDriftPressure
 }
 
 export interface LongSessionBenchmarkResult {
 	sessionId: string
 	totalTurnCount: number
 	requestedCheckpoints: number[]
+	checkpointMode: LongSessionCheckpointMode
 	executedCheckpoints: LongSessionBenchmarkCheckpoint[]
+	pressureHistory: BalloonDriftPressureHistorySummary
 	forceStageCount: number | null
 }
 
@@ -179,13 +250,16 @@ export interface LongSessionBenchmarkCheckpointScore {
 	actualTurnCount: number
 	checkpointSessionId: string
 	scorecard: BalloonBenchmarkScorecard
+	driftPressure: BalloonDriftPressure
 }
 
 export interface LongSessionBenchmarkScoreResult {
 	sessionId: string
 	totalTurnCount: number
 	requestedCheckpoints: number[]
+	checkpointMode: LongSessionCheckpointMode
 	executedCheckpoints: LongSessionBenchmarkCheckpointScore[]
+	pressureHistory: BalloonDriftPressureHistorySummary
 	laneTotals: BalloonBenchmarkLaneTotals
 	topLanes: Array<BalloonBenchmarkLaneScore["lane"]>
 }
@@ -283,6 +357,7 @@ export interface SlopCodeProblemPreparation {
 	checkpointFiles: SlopCodeCheckpointFile[]
 	missingFiles: string[]
 	recommendedSessionId: string
+	recommendedCheckpointMode: LongSessionCheckpointMode
 	recommendedInstructions: string[]
 	suggestedCompareBenchmarkPrompt: string
 }
@@ -292,6 +367,7 @@ export interface SlopCodeStarterBenchmarkProblemPlan {
 	category: string
 	difficulty: string
 	recommendedSessionId: string
+	recommendedCheckpointMode: LongSessionCheckpointMode
 	recommendedCheckpointBatch: number[]
 	recommendedForceStageCount: number
 	recommendedLongSessionThresholds: number[]
@@ -330,6 +406,208 @@ export interface SlopCodeStarterSuiteSummary {
 	laneTotals: BalloonBenchmarkLaneTotals
 	topLanes: Array<BalloonBenchmarkLaneScore["lane"]>
 	problems: SlopCodeStarterSuiteProblemSummary[]
+}
+
+export type BalloonHostKind = "vscode" | "cline" | "roo_code" | "claude_desktop" | "generic_json"
+
+export type BalloonHostReadinessTier = "recommended_first" | "promising" | "experimental" | "manual"
+
+export type BalloonHostConfigRoot = "servers" | "mcpServers"
+
+export type BalloonHostFlowKind = "run_cycle" | "repair_next_turn" | "review_session_drift" | "compare_benchmark_lanes" | "install_diagnostics"
+
+export type BalloonHostChatRecommendation = "same_chat_ok" | "fresh_chat_preferred"
+
+export interface BalloonHostSurface {
+	host: BalloonHostKind
+	displayName: string
+	readinessTier: BalloonHostReadinessTier
+	status: string
+	configRoot: BalloonHostConfigRoot
+	exampleConfigPath: string
+	docsPath: string
+	recommendedFirstTools: string[]
+	promptSensitiveSurfaces: string[]
+	restartHints: string[]
+	knownCaveats: string[]
+	notes: string[]
+}
+
+export interface BalloonHostSetupPacket {
+	host: BalloonHostKind
+	displayName: string
+	readinessTier: BalloonHostReadinessTier
+	status: string
+	configRoot: BalloonHostConfigRoot
+	repoPath: string
+	command: string
+	args: string[]
+	cwd: string
+	dataDir: string
+	resolvedStartPath: string | null
+	buildReady: boolean
+	configSnippet: string
+	exampleConfigPath: string
+	docsPath: string
+	recommendedFirstTools: string[]
+	promptSensitiveSurfaces: string[]
+	restartHints: string[]
+	validationWarnings: string[]
+	firstRunChecklist: string[]
+}
+
+export interface BalloonHostSetupValidation {
+	host: BalloonHostKind
+	displayName: string
+	configSource: string
+	expectedConfigRoot: BalloonHostConfigRoot
+	actualConfigRoot: BalloonHostConfigRoot | "unknown"
+	foundServerEntry: boolean
+	valid: boolean
+	command: string | null
+	args: string[]
+	cwd: string | null
+	resolvedCwd: string | null
+	resolvedStartPath: string | null
+	buildReady: boolean | null
+	errors: string[]
+	warnings: string[]
+	suggestedFixes: string[]
+}
+
+export interface BalloonInstallDiagnostics {
+	host: BalloonHostKind | null
+	hostDisplayName: string | null
+	configCheckMode: "none" | "generated" | "provided"
+	repoPath: string
+	buildReady: boolean
+	resolvedStartPath: string | null
+	toolCount: number
+	promptCount: number
+	resourceCount: number
+	recommendedFirstTools: string[]
+	promptSensitiveSurfaces: string[]
+	promptFallbackReady: boolean
+	benchmarkSurfaceReady: boolean
+	hostConfigValidation: BalloonHostSetupValidation | null
+	overallReady: boolean
+	warnings: string[]
+	recommendedNextSteps: string[]
+}
+
+export interface BalloonHostPromptPacketMessage {
+	role: "user" | "assistant" | "system"
+	text: string
+}
+
+export interface BalloonHostPromptPacket {
+	name: string
+	description: string
+	messages: BalloonHostPromptPacketMessage[]
+}
+
+export interface BalloonHostFlowPacket {
+	host: BalloonHostKind
+	displayName: string
+	readinessTier: BalloonHostReadinessTier
+	status: string
+	flow: BalloonHostFlowKind
+	title: string
+	summary: string
+	preferredSurface: "tool" | "prompt" | "resource"
+	alternateSurface: "tool" | "prompt" | "resource" | "none"
+	recommendedChatState: BalloonHostChatRecommendation
+	docsPath: string
+	exampleRequestPath: string | null
+	toolName: string | null
+	toolArgs: Record<string, unknown> | null
+	promptName: string | null
+	promptArgs: Record<string, unknown> | null
+	promptPacket: BalloonHostPromptPacket | null
+	instructions: string[]
+	ifHostFeelsFlaky: string[]
+	restartHints: string[]
+	warnings: string[]
+}
+
+export type BalloonHostValidationCaseId =
+	| "install_doctor"
+	| "same_chat_tool_repair"
+	| "fresh_chat_prompt_repair"
+	| "fresh_chat_prompt_review"
+	| "same_chat_benchmark_compare"
+
+export interface BalloonHostValidationCase {
+	caseId: BalloonHostValidationCaseId
+	title: string
+	goal: string
+	chatStateUnderTest: BalloonHostChatRecommendation
+	primarySurfaceUnderTest: "tool" | "prompt" | "resource"
+	prerequisitePackets: BalloonHostFlowPacket[]
+	primaryPacket: BalloonHostFlowPacket
+	steps: string[]
+	successSignals: string[]
+	failureSignals: string[]
+}
+
+export interface BalloonHostValidationSuite {
+	host: BalloonHostKind
+	displayName: string
+	readinessTier: BalloonHostReadinessTier
+	status: string
+	docsPath: string
+	validationDocPath: string
+	summary: string
+	recommendedOrder: BalloonHostValidationCaseId[]
+	cases: BalloonHostValidationCase[]
+	warnings: string[]
+}
+
+export type BalloonHostValidationResultStatus = "pass" | "partial" | "fail"
+
+export interface BalloonHostValidationEvidence {
+	runId: string
+	host: BalloonHostKind
+	caseId: BalloonHostValidationCaseId
+	status: BalloonHostValidationResultStatus
+	chatStateUnderTest: BalloonHostChatRecommendation
+	summary: string
+	findings: string[]
+	suggestedFixes: string[]
+	sessionId: string | null
+	hostVersion: string | null
+	recordedAt: string
+}
+
+export interface BalloonHostValidationCaseEvidenceRollup {
+	caseId: BalloonHostValidationCaseId
+	title: string
+	latestStatus: BalloonHostValidationResultStatus | "not_run"
+	latestSummary: string | null
+	totalRuns: number
+	passCount: number
+	partialCount: number
+	failCount: number
+	lastRecordedAt: string | null
+}
+
+export interface BalloonHostValidationEvidenceSummary {
+	host: BalloonHostKind
+	displayName: string
+	readinessTier: BalloonHostReadinessTier
+	status: string
+	totalRuns: number
+	passCount: number
+	partialCount: number
+	failCount: number
+	latestRecordedAt: string | null
+	coverage: {
+		completedCases: number
+		totalCases: number
+	}
+	cases: BalloonHostValidationCaseEvidenceRollup[]
+	recentRuns: BalloonHostValidationEvidence[]
+	openRisks: string[]
 }
 
 export interface BalloonSessionSummary {

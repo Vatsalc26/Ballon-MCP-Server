@@ -1,0 +1,5 @@
+{
+  "host": "vscode",
+  "repoPath": "REPLACE_WITH_YOUR_BALLOON_MCP_REPO_PATH",
+  "configPath": "REPLACE_WITH_YOUR_HOST_CONFIG_PATH"
+}
