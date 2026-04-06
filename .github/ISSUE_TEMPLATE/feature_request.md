@@ -31,3 +31,11 @@ Please note whether this request is:
 1. clearly within the current external approximation
 2. a longer-term roadmap item
 3. likely to need deeper architecture discussion first
+
+## Starter issue?
+
+If you think this is contributor-friendly, say whether it could become:
+
+1. `good first issue`
+2. `help wanted`
+3. a deeper maintainer task instead

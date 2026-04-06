@@ -189,9 +189,11 @@ If the demo feels good, the important part is not that Balloon produced more tex
 10. [Benchmark lanes](./docs/BENCHMARK_LANES.md)
 11. [Long-session benchmark](./docs/LONG_SESSION_BENCHMARK.md)
 12. [SlopCodeBench starter suite](./docs/SLOPCODEBENCH_STARTER_SUITE.md)
-13. [Architecture roadmap](./docs/ROADMAP.md)
-14. [Contributing](./CONTRIBUTING.md)
-15. [Security policy](./SECURITY.md)
+13. [Contributor starters](./docs/CONTRIBUTOR_STARTERS.md)
+14. [MCP listings](./docs/MCP_LISTINGS.md)
+15. [Architecture roadmap](./docs/ROADMAP.md)
+16. [Contributing](./CONTRIBUTING.md)
+17. [Security policy](./SECURITY.md)
 
 ## Good Fit
 

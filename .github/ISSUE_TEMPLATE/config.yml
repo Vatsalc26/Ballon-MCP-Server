@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security policy
+    url: https://github.com/Vatsalc26/Ballon-MCP-Server/blob/main/SECURITY.md
+    about: Please do not file public security issues. Use the security policy path instead.
+  - name: Contributing guide
+    url: https://github.com/Vatsalc26/Ballon-MCP-Server/blob/main/CONTRIBUTING.md
+    about: Read this before opening a feature or contribution-planning issue.
+  - name: Contributor starters
+    url: https://github.com/Vatsalc26/Ballon-MCP-Server/blob/main/docs/CONTRIBUTOR_STARTERS.md
+    about: Good first issue ideas and starter workstreams for new contributors.

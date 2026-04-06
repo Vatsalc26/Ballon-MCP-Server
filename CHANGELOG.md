@@ -25,6 +25,8 @@ All notable public changes to Balloon MCP should be recorded in this file.
 19. added `verify_slopcodebench_dataset` so local SlopCodeBench snapshots can be checked against expected official repo markers before benchmarking
 20. added `balloon_describe_slopcode_starter_suite` and `balloon_prepare_slopcode_problem` so the first real SCBench starter problems are inspectable through MCP
 21. added `verify_slopcodebench_starter_suite` plus starter-suite docs/examples for `file_backup`, `execution_server`, and `trajectory_api`
+22. tightened the public issue surface with benchmark and host-compatibility templates plus contributor-starter guidance
+23. added a public MCP listings guide so registry and directory submissions stay honest and repeatable
 
 ## 0.1.0-alpha.0 - 2026-04-05
 

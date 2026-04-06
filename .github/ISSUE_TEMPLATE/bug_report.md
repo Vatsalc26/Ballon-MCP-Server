@@ -29,6 +29,16 @@ What happened instead?
 
 Provide the smallest reproducible sequence you can.
 
+## Which Balloon surface failed
+
+- tool
+- prompt
+- resource
+- semantic assist
+- staged lane
+- benchmark workflow
+- host setup
+
 ## Logs or artifacts
 
 Paste relevant output, but do not include secrets or private credentials.
