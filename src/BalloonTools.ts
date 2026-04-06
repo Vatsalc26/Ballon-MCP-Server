@@ -1208,6 +1208,7 @@ function formatSlopCodeStarterSuiteSummary(summary: SlopCodeStarterSuiteSummary)
 						`Deterministic total: ${problem.scoreResult.laneTotals.deterministic}/${problem.scoreResult.laneTotals.maxTotal}`,
 						`Assist total: ${problem.scoreResult.laneTotals.assist}/${problem.scoreResult.laneTotals.maxTotal}`,
 						`Staged total: ${problem.scoreResult.laneTotals.staged}/${problem.scoreResult.laneTotals.maxTotal}`,
+						...formatPressureSummaryBlock(buildArtifactPressureSummary(problem.scoreResult)),
 					]
 				: ["Score summary: not available yet"]),
 			...(problem.warnings.length > 0 ? problem.warnings.map((warning, warningIndex) => `Warning ${warningIndex + 1}: ${warning}`) : []),
@@ -1224,6 +1225,9 @@ type StarterSuiteArtifactProblemExport = {
 	executedCheckpoints: number[]
 	topLanes: Array<BalloonBenchmarkLaneScore["lane"]>
 	laneTotals: BalloonBenchmarkLaneTotals | null
+	pressureHistory: BalloonDriftPressureHistorySummary | null
+	pressureAlerts: string[]
+	highPressureCheckpoints: number[]
 	warnings: string[]
 	regressions: string[]
 	jsonPath: string
@@ -1240,10 +1244,21 @@ type StarterSuiteArtifactExportBundle = {
 	coveredProblems: number
 	laneTotals: BalloonBenchmarkLaneTotals
 	topLanes: Array<BalloonBenchmarkLaneScore["lane"]>
+	pressureAlerts: string[]
 	regressions: string[]
 	summaryJsonPath: string
 	summaryMarkdownPath: string
 	problems: StarterSuiteArtifactProblemExport[]
+}
+
+type StarterSuiteArtifactPressureSummary = {
+	trend: BalloonDriftPressureHistorySummary["trend"]
+	latestLevel: BalloonDriftPressureHistorySummary["latestLevel"]
+	latestScore: number | null
+	peakScore: number | null
+	averageScore: number | null
+	highPressureCheckpoints: number[]
+	lowPressureCheckpoints: number[]
 }
 
 function makeArtifactStamp(): string {
@@ -1286,6 +1301,59 @@ function collectLaneRegressions(laneTotals: BalloonBenchmarkLaneTotals): string[
 	return notes
 }
 
+function buildArtifactPressureSummary(scoreResult: LongSessionBenchmarkScoreResult | null): StarterSuiteArtifactPressureSummary | null {
+	if (!scoreResult) return null
+	return {
+		trend: scoreResult.pressureHistory.trend,
+		latestLevel: scoreResult.pressureHistory.latestLevel,
+		latestScore: scoreResult.pressureHistory.latestScore,
+		peakScore: scoreResult.pressureHistory.peakScore,
+		averageScore: scoreResult.pressureHistory.averageScore,
+		highPressureCheckpoints: scoreResult.executedCheckpoints
+			.filter((checkpoint) => checkpoint.driftPressure.score >= 40 || checkpoint.driftPressure.level === "high" || checkpoint.driftPressure.level === "critical")
+			.map((checkpoint) => checkpoint.actualTurnCount),
+		lowPressureCheckpoints: scoreResult.executedCheckpoints
+			.filter((checkpoint) => checkpoint.driftPressure.score < 18 && checkpoint.driftPressure.level === "low")
+			.map((checkpoint) => checkpoint.actualTurnCount),
+	}
+}
+
+function collectPressureAlerts(summary: StarterSuiteArtifactPressureSummary | null): string[] {
+	if (!summary) return []
+	const notes: string[] = []
+	if (summary.trend === "rising") notes.push("Pressure trend is rising across the scored checkpoints.")
+	if (summary.trend === "falling") notes.push("Pressure trend is falling across the scored checkpoints.")
+	if (summary.latestLevel === "high" || summary.latestLevel === "critical") notes.push(`Latest pressure is still ${summary.latestLevel} (${summary.latestScore ?? "unknown"}/100).`)
+	if ((summary.peakScore ?? 0) >= 70) notes.push(`Peak pressure reached ${summary.peakScore}/100 during the checkpoint sequence.`)
+	if ((summary.averageScore ?? 0) >= 45) notes.push(`Average pressure stayed elevated at ${summary.averageScore}/100.`)
+	if (summary.highPressureCheckpoints.length > 0) notes.push(`High-pressure checkpoints: ${summary.highPressureCheckpoints.join(", ")}.`)
+	if (notes.length === 0 && summary.lowPressureCheckpoints.length > 0) notes.push(`Low-pressure checkpoints: ${summary.lowPressureCheckpoints.join(", ")}.`)
+	return notes
+}
+
+function formatPressureSummaryBlock(summary: StarterSuiteArtifactPressureSummary | null): string[] {
+	if (!summary) return ["Pressure trace: not available yet"]
+	return [
+		`Pressure trend: ${summary.trend}`,
+		`Latest pressure: ${summary.latestLevel ?? "none"} (${summary.latestScore ?? "none"}/100)`,
+		`Peak pressure: ${summary.peakScore ?? "none"}`,
+		`Average pressure: ${summary.averageScore ?? "none"}`,
+		`High-pressure checkpoints: ${summary.highPressureCheckpoints.length > 0 ? summary.highPressureCheckpoints.join(", ") : "none"}`,
+	]
+}
+
+function collectSuitePressureAlerts(problems: StarterSuiteArtifactProblemExport[]): string[] {
+	const risingProblems = problems.filter((problem) => problem.pressureHistory?.trend === "rising").map((problem) => problem.problemName)
+	const stuckProblems = problems
+		.filter((problem) => problem.pressureHistory && ((problem.pressureHistory.latestLevel === "high" || problem.pressureHistory.latestLevel === "critical") || (problem.pressureHistory.averageScore ?? 0) >= 45))
+		.map((problem) => problem.problemName)
+	const notes: string[] = []
+	if (risingProblems.length > 0) notes.push(`Rising pressure still appears in: ${risingProblems.join(", ")}.`)
+	if (stuckProblems.length > 0) notes.push(`Elevated pressure still appears in: ${stuckProblems.join(", ")}.`)
+	if (notes.length === 0 && problems.some((problem) => problem.covered)) notes.push("No rising or persistently elevated pressure was recorded in the exported starter problems.")
+	return notes
+}
+
 function formatLaneTotalsBlock(laneTotals: BalloonBenchmarkLaneTotals | null): string[] {
 	if (!laneTotals) return ["Lane totals: not available yet"]
 	return [
@@ -1299,9 +1367,11 @@ function formatLaneTotalsBlock(laneTotals: BalloonBenchmarkLaneTotals | null): s
 function formatStarterSuiteArtifactProblemMarkdown(options: {
 	problem: SlopCodeStarterSuiteSummary["problems"][number]
 	regressions: string[]
+	pressureSummary: StarterSuiteArtifactPressureSummary | null
+	pressureAlerts: string[]
 	generatedAt: string
 }): string {
-	const { problem, regressions, generatedAt } = options
+	const { problem, regressions, pressureSummary, pressureAlerts, generatedAt } = options
 	return [
 		`# SCBench Starter Artifact: ${problem.problemName}`,
 		"",
@@ -1316,6 +1386,12 @@ function formatStarterSuiteArtifactProblemMarkdown(options: {
 		"",
 		"Top lane(s)",
 		problem.scoreResult?.topLanes.join(", ") || "none",
+		"",
+		"Pressure trace",
+		...formatPressureSummaryBlock(pressureSummary),
+		"",
+		"Pressure alerts",
+		...(pressureAlerts.length > 0 ? pressureAlerts.map((note, index) => `${index + 1}. ${note}`) : ["None recorded."]),
 		"",
 		"Regressions",
 		...(regressions.length > 0 ? regressions.map((note, index) => `${index + 1}. ${note}`) : ["None recorded."]),
@@ -1340,6 +1416,9 @@ function formatStarterSuiteArtifactSummaryMarkdown(bundle: StarterSuiteArtifactE
 		`Top lane(s): ${bundle.topLanes.join(", ") || "none"}`,
 		...formatLaneTotalsBlock(bundle.laneTotals),
 		"",
+		"Suite pressure alerts",
+		...(bundle.pressureAlerts.length > 0 ? bundle.pressureAlerts.map((note, index) => `${index + 1}. ${note}`) : ["None recorded."]),
+		"",
 		"Suite regressions",
 		...(bundle.regressions.length > 0 ? bundle.regressions.map((note, index) => `${index + 1}. ${note}`) : ["None recorded."]),
 		"",
@@ -1351,6 +1430,7 @@ function formatStarterSuiteArtifactSummaryMarkdown(bundle: StarterSuiteArtifactE
 			`JSON: ${problem.jsonPath}`,
 			`Markdown: ${problem.markdownPath}`,
 			`Top lane(s): ${problem.topLanes.join(", ") || "none"}`,
+			...(problem.pressureAlerts.length > 0 ? problem.pressureAlerts.map((note, noteIndex) => `Pressure ${noteIndex + 1}: ${note}`) : []),
 			...(problem.regressions.length > 0 ? problem.regressions.map((note, noteIndex) => `Regression ${noteIndex + 1}: ${note}`) : []),
 			...(problem.warnings.length > 0 ? problem.warnings.map((warning, warningIndex) => `Warning ${warningIndex + 1}: ${warning}`) : []),
 			"",
@@ -1376,16 +1456,20 @@ function buildStarterSuiteArtifactExport(
 
 	const exportedProblems: StarterSuiteArtifactProblemExport[] = summary.problems.map((problem) => {
 		const regressions = problem.scoreResult ? collectLaneRegressions(problem.scoreResult.laneTotals) : []
+		const pressureSummary = buildArtifactPressureSummary(problem.scoreResult)
+		const pressureAlerts = collectPressureAlerts(pressureSummary)
 		const problemStem = safeArtifactName(problem.problemName)
 		const jsonPath = path.join(problemsDir, `${problemStem}.json`)
 		const markdownPath = path.join(problemsDir, `${problemStem}.md`)
 		const payload = {
 			generatedAt,
 			problem,
+			pressureSummary,
+			pressureAlerts,
 			regressions,
 		}
 		fs.writeFileSync(jsonPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8")
-		fs.writeFileSync(markdownPath, `${formatStarterSuiteArtifactProblemMarkdown({ problem, regressions, generatedAt })}\n`, "utf8")
+		fs.writeFileSync(markdownPath, `${formatStarterSuiteArtifactProblemMarkdown({ problem, regressions, pressureSummary, pressureAlerts, generatedAt })}\n`, "utf8")
 		return {
 			problemName: problem.problemName,
 			sessionId: problem.sessionId,
@@ -1394,6 +1478,9 @@ function buildStarterSuiteArtifactExport(
 			executedCheckpoints: problem.executedCheckpoints,
 			topLanes: problem.scoreResult?.topLanes ?? [],
 			laneTotals: problem.scoreResult?.laneTotals ?? null,
+			pressureHistory: problem.scoreResult?.pressureHistory ?? null,
+			pressureAlerts,
+			highPressureCheckpoints: pressureSummary?.highPressureCheckpoints ?? [],
 			warnings: problem.warnings,
 			regressions,
 			jsonPath,
@@ -1402,6 +1489,7 @@ function buildStarterSuiteArtifactExport(
 	})
 
 	const regressions = collectLaneRegressions(summary.laneTotals)
+	const pressureAlerts = collectSuitePressureAlerts(exportedProblems)
 	const summaryJsonPath = path.join(outputDir, "summary.json")
 	const summaryMarkdownPath = path.join(outputDir, "summary.md")
 	const bundle: StarterSuiteArtifactExportBundle = {
@@ -1414,6 +1502,7 @@ function buildStarterSuiteArtifactExport(
 		coveredProblems: summary.coveredProblems,
 		laneTotals: summary.laneTotals,
 		topLanes: summary.topLanes,
+		pressureAlerts,
 		regressions,
 		summaryJsonPath,
 		summaryMarkdownPath,
@@ -3989,6 +4078,9 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					`Summary JSON: ${bundle.summaryJsonPath}`,
 					`Summary Markdown: ${bundle.summaryMarkdownPath}`,
 					"",
+					"Suite pressure alerts",
+					...(bundle.pressureAlerts.length > 0 ? bundle.pressureAlerts.map((note, index) => `${index + 1}. ${note}`) : ["None recorded."]),
+					"",
 					"Suite regressions",
 					...(bundle.regressions.length > 0 ? bundle.regressions.map((note, index) => `${index + 1}. ${note}`) : ["None recorded."]),
 					"",
@@ -3998,6 +4090,7 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 						`Covered: ${problem.covered ? "yes" : "no"}`,
 						`JSON: ${problem.jsonPath}`,
 						`Markdown: ${problem.markdownPath}`,
+						...(problem.pressureAlerts.length > 0 ? problem.pressureAlerts.map((note, noteIndex) => `Pressure ${noteIndex + 1}: ${note}`) : []),
 						...(problem.regressions.length > 0 ? problem.regressions.map((note, noteIndex) => `Regression ${noteIndex + 1}: ${note}`) : []),
 					]),
 				].join("\n")

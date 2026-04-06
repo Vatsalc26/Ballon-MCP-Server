@@ -84,6 +84,8 @@ Use `balloon_score_long_session_benchmark` when you want the same checkpoints sc
 
 Use `balloon_export_slopcode_starter_artifacts` when you want JSON and Markdown summaries written to disk for repo-backed benchmark tracking.
 
+Those artifact exports now include pressure-trace summaries too, so you can see which starter problems kept rising, which ones settled, and where high-pressure checkpoints still remain.
+
 Suggested starting call:
 
 ```text

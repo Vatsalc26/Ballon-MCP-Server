@@ -73,6 +73,7 @@ They exist to make the starter suite:
 9. when you score a whole SCBench checkpoint sequence, use `balloon_score_long_session_benchmark` with `checkpointMode: assistant_checkpoint`
 10. once several problem sessions exist, roll them up with `balloon_summarize_slopcode_starter_suite`
 11. save JSON and Markdown benchmark artifacts with `balloon_export_slopcode_starter_artifacts`
+12. use the exported pressure traces to note where Balloon actually reduced drift and where pressure stayed elevated
 
 ## Recommended First Order
 
@@ -114,3 +115,4 @@ That means contributors no longer have to improvise:
 5. how to summarize the whole starter suite once multiple real sessions exist
 6. how to save JSON and Markdown artifacts for the rerun
 7. how to keep claims honest while still gathering useful anti-slop evidence
+8. how to point to concrete rising/falling pressure traces instead of hand-waving about session quality

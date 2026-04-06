@@ -852,7 +852,8 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 				summaryJsonPath?: string
 				summaryMarkdownPath?: string
 				coveredProblems?: number
-				problems?: Array<{ problemName?: string; covered?: boolean; jsonPath?: string; markdownPath?: string }>
+				pressureAlerts?: string[]
+				problems?: Array<{ problemName?: string; covered?: boolean; jsonPath?: string; markdownPath?: string; pressureAlerts?: string[]; highPressureCheckpoints?: number[] }>
 			}
 		}
 		const exportedProblem = starterArtifactExport.structuredContent?.problems?.[0]
@@ -862,12 +863,15 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 		const exportedProblemMarkdownPath = exportedProblem?.markdownPath
 		const slopcodeStarterArtifactExportWorked =
 			starterArtifactExport.structuredContent?.coveredProblems === 1 &&
+			(starterArtifactExport.structuredContent?.pressureAlerts?.length ?? 0) >= 1 &&
 			typeof summaryJsonPath === "string" &&
 			typeof summaryMarkdownPath === "string" &&
 			typeof exportedProblemJsonPath === "string" &&
 			typeof exportedProblemMarkdownPath === "string" &&
 			exportedProblem?.problemName === "file_backup" &&
 			exportedProblem?.covered === true &&
+			(exportedProblem?.pressureAlerts?.length ?? 0) >= 1 &&
+			(exportedProblem?.highPressureCheckpoints?.length ?? 0) >= 1 &&
 			fs.existsSync(summaryJsonPath) &&
 			fs.existsSync(summaryMarkdownPath) &&
 			fs.existsSync(exportedProblemJsonPath) &&
