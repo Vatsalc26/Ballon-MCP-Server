@@ -16,7 +16,7 @@ Balloon MCP is an MCP server for monitoring context fidelity in long AI sessions
 The server is designed around one central observation: long sessions do not only lose facts, they often lose the shape of the user's intent. Balloon turns that problem into a visible runtime surface with profiles, gap reports, retrieval anchors, corrective prompts, and replayable artifacts.
 
 <p align="center">
-  <img src="./docs/assets/balloon-mcp-stages.png" alt="Balloon MCP staged external prototype visual" width="560" />
+  <img src="./docs/assets/balloon-mcp-banner.png" alt="Balloon MCP anti-drift banner" width="760" />
 </p>
 
 At a glance:
@@ -227,8 +227,9 @@ If the demo feels good, the important part is not that Balloon produced more tex
 ## Visual Assets
 
 1. app/listing icon: [docs/assets/balloon-mcp-icon.png](./docs/assets/balloon-mcp-icon.png)
-2. staged explainer image: [docs/assets/balloon-mcp-stages.png](./docs/assets/balloon-mcp-stages.png)
-3. simple mark: [docs/assets/balloon-mcp-mark.png](./docs/assets/balloon-mcp-mark.png)
+2. README banner: [docs/assets/balloon-mcp-banner.png](./docs/assets/balloon-mcp-banner.png)
+3. staged explainer image: [docs/assets/balloon-mcp-stages.png](./docs/assets/balloon-mcp-stages.png)
+4. simple mark: [docs/assets/balloon-mcp-mark.png](./docs/assets/balloon-mcp-mark.png)
 
 ## Good Fit
 
