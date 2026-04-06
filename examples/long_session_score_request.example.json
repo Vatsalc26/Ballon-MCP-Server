@@ -1,0 +1,9 @@
+{
+  "tool": "balloon_score_long_session_benchmark",
+  "arguments": {
+    "sessionId": "long-bench-25",
+    "checkpoints": [10, 25],
+    "semanticAdapterPath": ".\\examples\\semantic_cara_adapter.example.mjs",
+    "stageThresholds": [5, 15, 40]
+  }
+}

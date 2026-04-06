@@ -1,6 +1,7 @@
 import type {
 	BalloonGap,
 	BalloonBenchmarkDimensionScore,
+	BalloonBenchmarkLaneTotals,
 	BalloonBenchmarkLaneScore,
 	BalloonBenchmarkScorecard,
 	BalloonBenchmarkScoreDimension,
@@ -8,11 +9,15 @@ import type {
 	BenchmarkLaneComparison,
 	HiddenRequirement,
 	LongSessionBenchmarkCheckpoint,
+	LongSessionBenchmarkCheckpointScore,
+	LongSessionBenchmarkResult,
+	LongSessionBenchmarkScoreResult,
 	ProxyTrickle,
 	ReleasePacket,
 	RetrievalHit,
 	SemanticCaraResult,
 	SlopCodeStarterBenchmarkPlan,
+	SlopCodeStarterSuiteSummary,
 	SlopCodeProblemPreparation,
 	SlopCodeStarterSuiteResult,
 	StagedBalloonResult,
@@ -92,6 +97,11 @@ function asPositiveIntArray(value: unknown, fallback: number[]): number[] {
 		.map((entry) => (typeof entry === "number" && Number.isFinite(entry) ? Math.floor(entry) : typeof entry === "string" && /^\d+$/u.test(entry) ? Number.parseInt(entry, 10) : NaN))
 		.filter((entry) => Number.isFinite(entry) && entry > 0)
 	return normalized.length > 0 ? normalized : [...fallback]
+}
+
+function asStringArray(value: unknown): string[] {
+	if (!Array.isArray(value)) return []
+	return value.map((entry) => asString(entry)).filter((entry): entry is string => entry !== null)
 }
 
 function asTurns(value: unknown): Array<{ role: string; content: string; timestamp?: string }> {
@@ -734,6 +744,191 @@ function buildBenchmarkScorecard(
 	}
 }
 
+function emptyLaneTotals(): BalloonBenchmarkLaneTotals {
+	return {
+		baseline: 0,
+		deterministic: 0,
+		assist: 0,
+		staged: 0,
+		maxTotal: 0,
+	}
+}
+
+function accumulateLaneTotals(target: BalloonBenchmarkLaneTotals, scorecard: BalloonBenchmarkScorecard): void {
+	target.baseline += scorecard.baseline.total
+	target.deterministic += scorecard.deterministic.total
+	target.assist += scorecard.assist.total
+	target.staged += scorecard.staged.total
+	target.maxTotal += scorecard.baseline.maxTotal
+}
+
+function topLanesFromTotals(totals: BalloonBenchmarkLaneTotals): Array<BalloonBenchmarkLaneScore["lane"]> {
+	const entries: Array<{ lane: BalloonBenchmarkLaneScore["lane"]; total: number }> = [
+		{ lane: "baseline", total: totals.baseline },
+		{ lane: "deterministic", total: totals.deterministic },
+		{ lane: "assist", total: totals.assist },
+		{ lane: "staged", total: totals.staged },
+	]
+	const bestTotal = Math.max(...entries.map((entry) => entry.total))
+	return entries.filter((entry) => entry.total === bestTotal).map((entry) => entry.lane)
+}
+
+function buildLongSessionBenchmarkResult(
+	store: BalloonStateStore,
+	sessionId: string,
+	options: BenchmarkLaneOptions & {
+		turns?: Array<{ role: string; content: string; timestamp?: string }>
+		mergeMode?: string | null
+		checkpoints?: unknown
+	},
+): LongSessionBenchmarkResult | null {
+	const incomingTurns = options.turns ?? []
+	if (incomingTurns.length > 0) {
+		const mergeMode = options.mergeMode === "append" ? "append" : "replace"
+		if (mergeMode === "replace") store.replaceTurns(sessionId, incomingTurns)
+		else store.appendTurns(sessionId, incomingTurns)
+	}
+	const storedTurns = store.getTurns(sessionId, 5000)
+	if (storedTurns.length === 0) return null
+	const requestedCheckpoints = asPositiveIntArray(options.checkpoints, [10, 25, 50])
+	const checkpointSpecs = resolveCheckpointTurns(
+		storedTurns.map((turn) => ({ role: turn.role, content: turn.content, timestamp: turn.timestamp })),
+		requestedCheckpoints,
+	)
+	if (checkpointSpecs.length === 0) return null
+	const executedCheckpoints: LongSessionBenchmarkCheckpoint[] = []
+	for (const checkpoint of checkpointSpecs) {
+		const checkpointTurns = storedTurns
+			.slice(0, checkpoint.actualTurnCount)
+			.map((turn) => ({ role: turn.role, content: turn.content, timestamp: turn.timestamp }))
+		const checkpointSessionId = `${sessionId}__checkpoint_${checkpoint.actualTurnCount}`
+		store.replaceTurns(checkpointSessionId, checkpointTurns)
+		const comparison = buildBenchmarkLaneComparison(store, checkpointSessionId, {
+			semanticAdapterPath: options.semanticAdapterPath,
+			semanticTimeoutMs: options.semanticTimeoutMs,
+			semanticMaxNotes: options.semanticMaxNotes,
+			forceStageCount: options.forceStageCount,
+			stageThresholds: options.stageThresholds,
+		})
+		if (!comparison) return null
+		executedCheckpoints.push({
+			checkpoint: checkpoint.checkpoint,
+			actualTurnCount: checkpoint.actualTurnCount,
+			checkpointSessionId,
+			requestText: comparison.requestText,
+			latestResponse: comparison.latestResponse,
+			comparison,
+		})
+	}
+	return {
+		sessionId,
+		totalTurnCount: storedTurns.length,
+		requestedCheckpoints,
+		executedCheckpoints,
+		forceStageCount: typeof options.forceStageCount === "number" && Number.isFinite(options.forceStageCount) ? Math.floor(options.forceStageCount) : null,
+	}
+}
+
+function buildLongSessionBenchmarkScoreResult(
+	store: BalloonStateStore,
+	sessionId: string,
+	options: BenchmarkLaneOptions & {
+		turns?: Array<{ role: string; content: string; timestamp?: string }>
+		mergeMode?: string | null
+		checkpoints?: unknown
+	},
+): LongSessionBenchmarkScoreResult | null {
+	const benchmark = buildLongSessionBenchmarkResult(store, sessionId, options)
+	if (!benchmark) return null
+	const executedCheckpoints: LongSessionBenchmarkCheckpointScore[] = []
+	const laneTotals = emptyLaneTotals()
+	for (const checkpoint of benchmark.executedCheckpoints) {
+		const scorecard = buildBenchmarkScorecard(store, checkpoint.checkpointSessionId, {
+			semanticAdapterPath: options.semanticAdapterPath,
+			semanticTimeoutMs: options.semanticTimeoutMs,
+			semanticMaxNotes: options.semanticMaxNotes,
+			forceStageCount: options.forceStageCount,
+			stageThresholds: options.stageThresholds,
+		})
+		if (!scorecard) return null
+		executedCheckpoints.push({
+			checkpoint: checkpoint.checkpoint,
+			actualTurnCount: checkpoint.actualTurnCount,
+			checkpointSessionId: checkpoint.checkpointSessionId,
+			scorecard,
+		})
+		accumulateLaneTotals(laneTotals, scorecard)
+	}
+	return {
+		sessionId: benchmark.sessionId,
+		totalTurnCount: benchmark.totalTurnCount,
+		requestedCheckpoints: benchmark.requestedCheckpoints,
+		executedCheckpoints,
+		laneTotals,
+		topLanes: topLanesFromTotals(laneTotals),
+	}
+}
+
+function buildSlopCodeStarterSuiteSummary(
+	store: BalloonStateStore,
+	options: BenchmarkLaneOptions & {
+		datasetRoot?: string | null
+		problemNames?: string[]
+	},
+): SlopCodeStarterSuiteSummary {
+	const datasetRoot = options.datasetRoot ?? undefined
+	const plan = buildSlopCodeStarterBenchmarkPlan(datasetRoot)
+	const selectedProblems = options.problemNames && options.problemNames.length > 0 ? new Set(options.problemNames) : null
+	const problems = plan.problems
+		.filter((problem) => (selectedProblems ? selectedProblems.has(problem.problemName) : true))
+		.map((problem) => {
+			const sessionTurns = store.getTurns(problem.recommendedSessionId, 5000)
+			const warnings: string[] = []
+			let scoreResult: LongSessionBenchmarkScoreResult | null = null
+			if (sessionTurns.length === 0) {
+				warnings.push("No stored turns found for the recommended session yet.")
+			} else {
+				scoreResult = buildLongSessionBenchmarkScoreResult(store, problem.recommendedSessionId, {
+					semanticAdapterPath: options.semanticAdapterPath,
+					semanticTimeoutMs: options.semanticTimeoutMs,
+					semanticMaxNotes: options.semanticMaxNotes,
+					forceStageCount: options.forceStageCount ?? problem.recommendedForceStageCount,
+					stageThresholds: options.stageThresholds ?? problem.recommendedLongSessionThresholds,
+					checkpoints: problem.recommendedCheckpointBatch,
+				})
+				if (!scoreResult) warnings.push("Stored session exists, but Balloon could not build a checkpointed score summary from it.")
+			}
+			return {
+				problemName: problem.problemName,
+				sessionId: problem.recommendedSessionId,
+				recommendedCheckpoints: [...problem.recommendedCheckpointBatch],
+				sessionPresent: sessionTurns.length > 0,
+				executedCheckpoints: scoreResult ? scoreResult.executedCheckpoints.map((checkpoint) => checkpoint.actualTurnCount) : [],
+				scoreResult,
+				warnings,
+			}
+		})
+	const laneTotals = emptyLaneTotals()
+	for (const problem of problems) {
+		if (problem.scoreResult) {
+			laneTotals.baseline += problem.scoreResult.laneTotals.baseline
+			laneTotals.deterministic += problem.scoreResult.laneTotals.deterministic
+			laneTotals.assist += problem.scoreResult.laneTotals.assist
+			laneTotals.staged += problem.scoreResult.laneTotals.staged
+			laneTotals.maxTotal += problem.scoreResult.laneTotals.maxTotal
+		}
+	}
+	return {
+		suiteName: `${plan.suiteName} Summary`,
+		datasetStatus: plan.datasetStatus,
+		totalProblems: problems.length,
+		coveredProblems: problems.filter((problem) => problem.scoreResult !== null).length,
+		laneTotals,
+		topLanes: topLanesFromTotals(laneTotals),
+		problems,
+	}
+}
+
 function formatBenchmarkLaneScore(laneScore: BalloonBenchmarkLaneScore): string {
 	return [
 		`${laneScore.lane}: ${laneScore.total}/${laneScore.maxTotal}`,
@@ -757,6 +952,62 @@ function formatBenchmarkScorecard(scorecard: BalloonBenchmarkScorecard): string 
 		formatBenchmarkLaneScore(scorecard.assist),
 		"",
 		formatBenchmarkLaneScore(scorecard.staged),
+	].join("\n")
+}
+
+function formatLongSessionBenchmarkScoreResult(result: LongSessionBenchmarkScoreResult): string {
+	return [
+		`Session: ${result.sessionId}`,
+		`Total turns: ${result.totalTurnCount}`,
+		`Requested checkpoints: ${result.requestedCheckpoints.join(", ")}`,
+		`Top lane(s): ${result.topLanes.join(", ")}`,
+		`Baseline total: ${result.laneTotals.baseline}/${result.laneTotals.maxTotal}`,
+		`Deterministic total: ${result.laneTotals.deterministic}/${result.laneTotals.maxTotal}`,
+		`Assist total: ${result.laneTotals.assist}/${result.laneTotals.maxTotal}`,
+		`Staged total: ${result.laneTotals.staged}/${result.laneTotals.maxTotal}`,
+		"",
+		...result.executedCheckpoints.flatMap((checkpoint, index) => [
+			`Checkpoint ${index + 1}`,
+			`Requested checkpoint: ${checkpoint.checkpoint}`,
+			`Executed turn count: ${checkpoint.actualTurnCount}`,
+			`Checkpoint session: ${checkpoint.checkpointSessionId}`,
+			formatBenchmarkScorecard(checkpoint.scorecard),
+			"",
+		]),
+	].join("\n")
+}
+
+function formatSlopCodeStarterSuiteSummary(summary: SlopCodeStarterSuiteSummary): string {
+	return [
+		summary.suiteName,
+		"",
+		formatSlopCodeDatasetStatus(summary.datasetStatus),
+		"",
+		`Covered problems: ${summary.coveredProblems}/${summary.totalProblems}`,
+		`Top lane(s): ${summary.topLanes.join(", ") || "none"}`,
+		`Baseline total: ${summary.laneTotals.baseline}/${summary.laneTotals.maxTotal}`,
+		`Deterministic total: ${summary.laneTotals.deterministic}/${summary.laneTotals.maxTotal}`,
+		`Assist total: ${summary.laneTotals.assist}/${summary.laneTotals.maxTotal}`,
+		`Staged total: ${summary.laneTotals.staged}/${summary.laneTotals.maxTotal}`,
+		"",
+		...summary.problems.flatMap((problem, index) => [
+			`${index + 1}. ${problem.problemName}`,
+			`Session id: ${problem.sessionId}`,
+			`Session present: ${problem.sessionPresent ? "yes" : "no"}`,
+			`Recommended checkpoints: ${problem.recommendedCheckpoints.join(", ")}`,
+			`Executed checkpoints: ${problem.executedCheckpoints.length > 0 ? problem.executedCheckpoints.join(", ") : "none"}`,
+			...(problem.scoreResult
+				? [
+						`Top lane(s): ${problem.scoreResult.topLanes.join(", ")}`,
+						`Baseline total: ${problem.scoreResult.laneTotals.baseline}/${problem.scoreResult.laneTotals.maxTotal}`,
+						`Deterministic total: ${problem.scoreResult.laneTotals.deterministic}/${problem.scoreResult.laneTotals.maxTotal}`,
+						`Assist total: ${problem.scoreResult.laneTotals.assist}/${problem.scoreResult.laneTotals.maxTotal}`,
+						`Staged total: ${problem.scoreResult.laneTotals.staged}/${problem.scoreResult.laneTotals.maxTotal}`,
+					]
+				: ["Score summary: not available yet"]),
+			...(problem.warnings.length > 0 ? problem.warnings.map((warning, warningIndex) => `Warning ${warningIndex + 1}: ${warning}`) : []),
+			"",
+		]),
 	].join("\n")
 }
 
@@ -1426,67 +1677,89 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 			run: (args, context) => {
 				const sessionId = asString(args.sessionId)
 				if (!sessionId) return toolError("sessionId is required.")
-				const incomingTurns = asTurns(args.turns)
-				if (incomingTurns.length > 0) {
-					const mergeMode = asString(args.mergeMode) === "append" ? "append" : "replace"
-					if (mergeMode === "replace") context.store.replaceTurns(sessionId, incomingTurns)
-					else context.store.appendTurns(sessionId, incomingTurns)
+				const benchmark = buildLongSessionBenchmarkResult(context.store, sessionId, {
+					turns: asTurns(args.turns),
+					mergeMode: asString(args.mergeMode),
+					checkpoints: args.checkpoints,
+					semanticAdapterPath: args.semanticAdapterPath,
+					semanticTimeoutMs: args.semanticTimeoutMs,
+					semanticMaxNotes: args.semanticMaxNotes,
+					forceStageCount: args.forceStageCount,
+					stageThresholds: args.stageThresholds,
+				})
+				if (!benchmark) {
+					return toolError(`Could not build the long-session benchmark for ${sessionId}. Make sure the session has user and assistant turns at the requested checkpoints.`)
 				}
-				const storedTurns = context.store.getTurns(sessionId, 5000)
-				if (storedTurns.length === 0) return toolError(`No turns found for session ${sessionId}. Provide turns or build the session first.`)
-				const requestedCheckpoints = asPositiveIntArray(args.checkpoints, [10, 25, 50])
-				const checkpointSpecs = resolveCheckpointTurns(
-					storedTurns.map((turn) => ({ role: turn.role, content: turn.content, timestamp: turn.timestamp })),
-					requestedCheckpoints,
-				)
-				if (checkpointSpecs.length === 0) {
-					return toolError(`No valid checkpoints found for session ${sessionId}. Make sure at least one checkpoint lands on or after an assistant turn.`)
-				}
-				const executedCheckpoints: LongSessionBenchmarkCheckpoint[] = []
-				for (const checkpoint of checkpointSpecs) {
-					const checkpointTurns = storedTurns
-						.slice(0, checkpoint.actualTurnCount)
-						.map((turn) => ({ role: turn.role, content: turn.content, timestamp: turn.timestamp }))
-					const checkpointSessionId = `${sessionId}__checkpoint_${checkpoint.actualTurnCount}`
-					context.store.replaceTurns(checkpointSessionId, checkpointTurns)
-					const comparison = buildBenchmarkLaneComparison(context.store, checkpointSessionId, {
-						semanticAdapterPath: args.semanticAdapterPath,
-						semanticTimeoutMs: args.semanticTimeoutMs,
-						semanticMaxNotes: args.semanticMaxNotes,
-						forceStageCount: args.forceStageCount,
-						stageThresholds: args.stageThresholds,
-					})
-					if (!comparison) return toolError(`Could not build checkpoint comparison for ${checkpointSessionId}.`)
-					executedCheckpoints.push({
-						checkpoint: checkpoint.checkpoint,
-						actualTurnCount: checkpoint.actualTurnCount,
-						checkpointSessionId,
-						requestText: comparison.requestText,
-						latestResponse: comparison.latestResponse,
-						comparison,
-					})
-				}
-				const assistChangedCount = executedCheckpoints.filter((entry) => entry.comparison.assistDiffers).length
-				const stagedChangedCount = executedCheckpoints.filter((entry) => entry.comparison.stagedDiffers).length
+				const assistChangedCount = benchmark.executedCheckpoints.filter((entry) => entry.comparison.assistDiffers).length
+				const stagedChangedCount = benchmark.executedCheckpoints.filter((entry) => entry.comparison.stagedDiffers).length
 				const text = [
 					"Balloon long-session benchmark ready.",
 					"",
 					`Base session: ${sessionId}`,
-					`Total turns: ${storedTurns.length}`,
-					`Requested checkpoints: ${requestedCheckpoints.join(", ")}`,
-					`Executed checkpoints: ${executedCheckpoints.map((entry) => entry.actualTurnCount).join(", ")}`,
-					`Assist changed deterministic at checkpoints: ${assistChangedCount}/${executedCheckpoints.length}`,
-					`Staged changed deterministic at checkpoints: ${stagedChangedCount}/${executedCheckpoints.length}`,
+					`Total turns: ${benchmark.totalTurnCount}`,
+					`Requested checkpoints: ${benchmark.requestedCheckpoints.join(", ")}`,
+					`Executed checkpoints: ${benchmark.executedCheckpoints.map((entry) => entry.actualTurnCount).join(", ")}`,
+					`Assist changed deterministic at checkpoints: ${assistChangedCount}/${benchmark.executedCheckpoints.length}`,
+					`Staged changed deterministic at checkpoints: ${stagedChangedCount}/${benchmark.executedCheckpoints.length}`,
 					"",
-					...executedCheckpoints.flatMap((entry, index) => [`Checkpoint ${index + 1}`, formatLongSessionCheckpoint(entry), ""]),
+					...benchmark.executedCheckpoints.flatMap((entry, index) => [`Checkpoint ${index + 1}`, formatLongSessionCheckpoint(entry), ""]),
 				].join("\n")
 				return textResult(text, {
-					sessionId,
-					totalTurnCount: storedTurns.length,
-					requestedCheckpoints,
-					executedCheckpoints,
-					forceStageCount: typeof args.forceStageCount === "number" && Number.isFinite(args.forceStageCount) ? Math.floor(args.forceStageCount) : null,
+					sessionId: benchmark.sessionId,
+					totalTurnCount: benchmark.totalTurnCount,
+					requestedCheckpoints: benchmark.requestedCheckpoints,
+					executedCheckpoints: benchmark.executedCheckpoints,
+					forceStageCount: benchmark.forceStageCount,
 				})
+			},
+		},
+		{
+			name: "balloon_score_long_session_benchmark",
+			title: "Score Long-Session Benchmark",
+			description: "Runs checkpointed long-session benchmarking and scores every checkpoint with the standard Balloon scorecard.",
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["sessionId"],
+				properties: {
+					sessionId: { type: "string", description: "Stable Balloon session id." },
+					turns: {
+						type: "array",
+						description: "Optional turns to replace or append before running checkpointed long-session scoring.",
+						items: {
+							type: "object",
+							required: ["role", "content"],
+							properties: {
+								role: { type: "string", enum: ["user", "assistant", "system"] },
+								content: { type: "string" },
+								timestamp: { type: "string" },
+							},
+						},
+					},
+					mergeMode: { type: "string", enum: ["replace", "append"], description: "Whether provided turns replace or append." },
+					checkpoints: { type: "array", description: "Optional checkpoint turn counts. Defaults to 10, 25, 50.", items: { type: "number" } },
+					semanticAdapterPath: { type: "string", description: "Optional semantic adapter path for the assist lane." },
+					semanticTimeoutMs: { type: "number", description: "Optional semantic adapter timeout in milliseconds." },
+					semanticMaxNotes: { type: "number", description: "Optional cap on semantic notes returned." },
+					forceStageCount: { type: "number", description: "Optional stage override for demos or controlled reruns." },
+					stageThresholds: { type: "array", description: "Optional staged-lane thresholds.", items: { type: "number" } },
+				},
+			},
+			run: (args, context) => {
+				const sessionId = asString(args.sessionId)
+				if (!sessionId) return toolError("sessionId is required.")
+				const result = buildLongSessionBenchmarkScoreResult(context.store, sessionId, {
+					turns: asTurns(args.turns),
+					mergeMode: asString(args.mergeMode),
+					checkpoints: args.checkpoints,
+					semanticAdapterPath: args.semanticAdapterPath,
+					semanticTimeoutMs: args.semanticTimeoutMs,
+					semanticMaxNotes: args.semanticMaxNotes,
+					forceStageCount: args.forceStageCount,
+					stageThresholds: args.stageThresholds,
+				})
+				if (!result) return toolError(`Could not build the long-session score summary for ${sessionId}.`)
+				return textResult(formatLongSessionBenchmarkScoreResult(result), result as unknown as JsonRecord)
 			},
 		},
 		{
@@ -1519,6 +1792,36 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 			run: (args) => {
 				const plan = buildSlopCodeStarterBenchmarkPlan(asString(args.datasetRoot) ?? undefined)
 				return textResult(formatSlopCodeStarterBenchmarkPlan(plan), plan as unknown as JsonRecord)
+			},
+		},
+		{
+			name: "balloon_summarize_slopcode_starter_suite",
+			title: "Summarize SlopCodeBench Starter Suite",
+			description: "Scores whatever SCBench starter-suite sessions Balloon has so far and rolls them up into one dataset-backed suite summary.",
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				properties: {
+					datasetRoot: { type: "string", description: "Optional local path to a SlopCodeBench snapshot or clone." },
+					problemNames: { type: "array", description: "Optional subset of starter-suite problems to summarize.", items: { type: "string" } },
+					semanticAdapterPath: { type: "string", description: "Optional semantic adapter path for the assist lane." },
+					semanticTimeoutMs: { type: "number", description: "Optional semantic adapter timeout in milliseconds." },
+					semanticMaxNotes: { type: "number", description: "Optional cap on semantic notes returned." },
+					forceStageCount: { type: "number", description: "Optional global stage override. Defaults to each problem's recommended stage count." },
+					stageThresholds: { type: "array", description: "Optional global staged-lane thresholds.", items: { type: "number" } },
+				},
+			},
+			run: (args, context) => {
+				const summary = buildSlopCodeStarterSuiteSummary(context.store, {
+					datasetRoot: asString(args.datasetRoot),
+					problemNames: asStringArray(args.problemNames),
+					semanticAdapterPath: args.semanticAdapterPath,
+					semanticTimeoutMs: args.semanticTimeoutMs,
+					semanticMaxNotes: args.semanticMaxNotes,
+					forceStageCount: args.forceStageCount,
+					stageThresholds: args.stageThresholds,
+				})
+				return textResult(formatSlopCodeStarterSuiteSummary(summary), summary as unknown as JsonRecord)
 			},
 		},
 		{

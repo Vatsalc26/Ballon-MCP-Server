@@ -78,6 +78,8 @@ Compare:
 
 Use `balloon_run_long_session_benchmark` when you want checkpointed long-session comparison in one tool call.
 
+Use `balloon_score_long_session_benchmark` when you want the same checkpoints scored automatically on Balloon's six-dimension scorecard.
+
 Suggested starting call:
 
 ```text
@@ -103,6 +105,28 @@ That call will return checkpoint batches with:
 
 If you want the standard six-dimension scorecard immediately after that, run `balloon_score_benchmark_lanes` on the same session.
 
+Suggested scoring call:
+
+```text
+Use #balloon_score_long_session_benchmark with:
+
+- sessionId: long-bench-25
+- checkpoints: [10, 25]
+- semanticAdapterPath: .\examples\semantic_cara_adapter.example.mjs
+- stageThresholds: [5, 15, 40]
+
+Return text only.
+Do not edit files.
+Do not apply patches.
+Do not run terminal commands.
+```
+
+That call will return:
+
+1. checkpoint-by-checkpoint scorecards
+2. aggregate lane totals
+3. top-performing lane(s) across the whole long-session batch
+
 ## Recommended Staged Profiles
 
 Try:
@@ -117,10 +141,12 @@ Use these starting fixtures:
 1. [../examples/long_session_25_turns.example.json](../examples/long_session_25_turns.example.json)
 2. [../examples/long_session_50_turns.example.json](../examples/long_session_50_turns.example.json)
 3. [../examples/long_session_benchmark_request.example.json](../examples/long_session_benchmark_request.example.json)
-4. [../examples/slopcode_starter_suite_request.example.json](../examples/slopcode_starter_suite_request.example.json)
-5. [../examples/slopcode_starter_benchmark_plan_request.example.json](../examples/slopcode_starter_benchmark_plan_request.example.json)
-6. [../examples/slopcode_problem_prep_request.example.json](../examples/slopcode_problem_prep_request.example.json)
-7. [../examples/benchmark_scorecard_request.example.json](../examples/benchmark_scorecard_request.example.json)
+4. [../examples/long_session_score_request.example.json](../examples/long_session_score_request.example.json)
+5. [../examples/slopcode_starter_suite_request.example.json](../examples/slopcode_starter_suite_request.example.json)
+6. [../examples/slopcode_starter_benchmark_plan_request.example.json](../examples/slopcode_starter_benchmark_plan_request.example.json)
+7. [../examples/slopcode_problem_prep_request.example.json](../examples/slopcode_problem_prep_request.example.json)
+8. [../examples/benchmark_scorecard_request.example.json](../examples/benchmark_scorecard_request.example.json)
+9. [../examples/slopcode_starter_suite_summary_request.example.json](../examples/slopcode_starter_suite_summary_request.example.json)
 
 They are not "official benchmark wins."
 

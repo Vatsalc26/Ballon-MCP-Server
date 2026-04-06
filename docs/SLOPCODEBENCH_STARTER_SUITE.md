@@ -34,9 +34,11 @@ Use:
 2. `balloon_plan_slopcode_starter_benchmark`
 3. `balloon_prepare_slopcode_problem`
 4. `balloon_score_benchmark_lanes`
-5. `balloon://benchmark/slopcode/starter-suite`
-6. `balloon://benchmark/slopcode/starter-suite/runbook`
-7. `balloon://benchmark/slopcode/problems/{problemName}`
+5. `balloon_score_long_session_benchmark`
+6. `balloon_summarize_slopcode_starter_suite`
+7. `balloon://benchmark/slopcode/starter-suite`
+8. `balloon://benchmark/slopcode/starter-suite/runbook`
+9. `balloon://benchmark/slopcode/problems/{problemName}`
 
 ## Fast Starter Workflow
 
@@ -48,6 +50,8 @@ Use:
 6. run the checkpoint sequence in your host
 7. compare lanes with `balloon_compare_benchmark_lanes`
 8. score them with `balloon_score_benchmark_lanes`
+9. if you stretch the same session across multiple checkpoints, score the whole checkpoint batch with `balloon_score_long_session_benchmark`
+10. after several problem sessions exist, roll them up with `balloon_summarize_slopcode_starter_suite`
 
 ## Recommended First Order
 
@@ -76,6 +80,8 @@ The starter suite now has both:
 
 1. a runbook tool
 2. a scorecard tool
+3. a long-session score tool
+4. a suite summary tool
 
 So contributors can move from dataset verification to repeatable scoring without inventing their own process each time.
 

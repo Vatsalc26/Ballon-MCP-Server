@@ -174,6 +174,22 @@ export interface LongSessionBenchmarkResult {
 	forceStageCount: number | null
 }
 
+export interface LongSessionBenchmarkCheckpointScore {
+	checkpoint: number
+	actualTurnCount: number
+	checkpointSessionId: string
+	scorecard: BalloonBenchmarkScorecard
+}
+
+export interface LongSessionBenchmarkScoreResult {
+	sessionId: string
+	totalTurnCount: number
+	requestedCheckpoints: number[]
+	executedCheckpoints: LongSessionBenchmarkCheckpointScore[]
+	laneTotals: BalloonBenchmarkLaneTotals
+	topLanes: Array<BalloonBenchmarkLaneScore["lane"]>
+}
+
 export type SlopCodeDatasetVerificationStatus = "verified" | "partial" | "missing"
 
 export interface SlopCodeDatasetStatus {
@@ -248,6 +264,14 @@ export interface BalloonBenchmarkScorecard {
 	}
 }
 
+export interface BalloonBenchmarkLaneTotals {
+	baseline: number
+	deterministic: number
+	assist: number
+	staged: number
+	maxTotal: number
+}
+
 export interface SlopCodeProblemPreparation {
 	problemName: string
 	datasetStatus: SlopCodeDatasetStatus
@@ -286,6 +310,26 @@ export interface SlopCodeStarterBenchmarkPlan {
 	runChecklist: string[]
 	communicationBoundaries: string[]
 	problems: SlopCodeStarterBenchmarkProblemPlan[]
+}
+
+export interface SlopCodeStarterSuiteProblemSummary {
+	problemName: string
+	sessionId: string
+	recommendedCheckpoints: number[]
+	sessionPresent: boolean
+	executedCheckpoints: number[]
+	scoreResult: LongSessionBenchmarkScoreResult | null
+	warnings: string[]
+}
+
+export interface SlopCodeStarterSuiteSummary {
+	suiteName: string
+	datasetStatus: SlopCodeDatasetStatus
+	totalProblems: number
+	coveredProblems: number
+	laneTotals: BalloonBenchmarkLaneTotals
+	topLanes: Array<BalloonBenchmarkLaneScore["lane"]>
+	problems: SlopCodeStarterSuiteProblemSummary[]
 }
 
 export interface BalloonSessionSummary {

@@ -1,0 +1,6 @@
+{
+  "tool": "balloon_summarize_slopcode_starter_suite",
+  "arguments": {
+    "semanticAdapterPath": ".\\examples\\semantic_cara_adapter.example.mjs"
+  }
+}

@@ -26,8 +26,10 @@ type SmokeResult = {
 	stagedCycleWorked: boolean
 	benchmarkLaneCompareWorked: boolean
 	benchmarkLaneScoreWorked: boolean
+	longSessionBenchmarkScoreWorked: boolean
 	slopcodeStarterSuiteWorked: boolean
 	slopcodeStarterRunbookWorked: boolean
+	slopcodeStarterSummaryWorked: boolean
 	slopcodeProblemPrepWorked: boolean
 	reviewDriftFallbackWorked: boolean
 	profileBuilt: boolean
@@ -243,8 +245,10 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			hasTool(toolsList, "balloon_compare_benchmark_lanes") &&
 			hasTool(toolsList, "balloon_score_benchmark_lanes") &&
 			hasTool(toolsList, "balloon_run_long_session_benchmark") &&
+			hasTool(toolsList, "balloon_score_long_session_benchmark") &&
 			hasTool(toolsList, "balloon_describe_slopcode_starter_suite") &&
 			hasTool(toolsList, "balloon_plan_slopcode_starter_benchmark") &&
+			hasTool(toolsList, "balloon_summarize_slopcode_starter_suite") &&
 			hasTool(toolsList, "balloon_prepare_slopcode_problem") &&
 			hasTool(toolsList, "balloon_review_session_drift")
 		details.push(`toolSurfacePassed=${toolSurfacePassed ? "yes" : "no"}`)
@@ -478,6 +482,28 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			Boolean(longSessionBenchmark.structuredContent?.executedCheckpoints?.[1]?.comparison?.stagedReply?.includes("The smallest safe next step"))
 		details.push(`longSessionBenchmarkWorked=${longSessionBenchmarkWorked ? "yes" : "no"}`)
 
+		const longSessionBenchmarkScore = (await client.request("tools/call", {
+			name: "balloon_score_long_session_benchmark",
+			arguments: {
+				sessionId: `${sessionId}-long`,
+				checkpoints: [3, 5],
+				semanticAdapterPath: "./examples/semantic_cara_adapter.example.mjs",
+				forceStageCount: 3,
+			},
+		})) as {
+			structuredContent?: {
+				topLanes?: string[]
+				laneTotals?: { baseline?: number; assist?: number; staged?: number; maxTotal?: number }
+				executedCheckpoints?: Array<{ scorecard?: { assist?: { total?: number } } }>
+			}
+		}
+		const longSessionBenchmarkScoreWorked =
+			(longSessionBenchmarkScore.structuredContent?.topLanes?.length ?? 0) >= 1 &&
+			(longSessionBenchmarkScore.structuredContent?.executedCheckpoints?.length ?? 0) >= 2 &&
+			(longSessionBenchmarkScore.structuredContent?.laneTotals?.assist ?? 0) >= (longSessionBenchmarkScore.structuredContent?.laneTotals?.baseline ?? 0) &&
+			(longSessionBenchmarkScore.structuredContent?.laneTotals?.staged ?? 0) >= (longSessionBenchmarkScore.structuredContent?.laneTotals?.baseline ?? 0)
+		details.push(`longSessionBenchmarkScoreWorked=${longSessionBenchmarkScoreWorked ? "yes" : "no"}`)
+
 		const starterSuite = (await client.request("tools/call", {
 			name: "balloon_describe_slopcode_starter_suite",
 			arguments: {},
@@ -507,6 +533,25 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			(starterRunbook.structuredContent?.scoreDimensions?.length ?? 0) === 6 &&
 			Boolean(starterRunbook.structuredContent?.problems?.[0]?.suggestedScorePrompt?.includes("balloon_score_benchmark_lanes"))
 		details.push(`slopcodeStarterRunbookWorked=${slopcodeStarterRunbookWorked ? "yes" : "no"}`)
+
+		const starterSuiteSummary = (await client.request("tools/call", {
+			name: "balloon_summarize_slopcode_starter_suite",
+			arguments: {
+				problemNames: ["execution_server"],
+				semanticAdapterPath: "./examples/semantic_cara_adapter.example.mjs",
+				forceStageCount: 3,
+			},
+		})) as {
+			structuredContent?: {
+				coveredProblems?: number
+				problems?: Array<{ problemName?: string; sessionPresent?: boolean; scoreResult?: { topLanes?: string[] } }>
+			}
+		}
+		const slopcodeStarterSummaryWorked =
+			(starterSuiteSummary.structuredContent?.coveredProblems ?? 0) >= 0 &&
+			starterSuiteSummary.structuredContent?.problems?.[0]?.problemName === "execution_server" &&
+			(starterSuiteSummary.structuredContent?.problems?.[0]?.sessionPresent ?? false) === false
+		details.push(`slopcodeStarterSummaryWorked=${slopcodeStarterSummaryWorked ? "yes" : "no"}`)
 
 		const problemPreparation = (await client.request("tools/call", {
 			name: "balloon_prepare_slopcode_problem",
@@ -628,8 +673,10 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			stagedCycleWorked,
 			benchmarkLaneCompareWorked,
 			benchmarkLaneScoreWorked,
+			longSessionBenchmarkScoreWorked,
 			slopcodeStarterSuiteWorked,
 			slopcodeStarterRunbookWorked,
+			slopcodeStarterSummaryWorked,
 			slopcodeProblemPrepWorked,
 			reviewDriftFallbackWorked,
 			profileBuilt,
@@ -660,7 +707,9 @@ export function formatBalloonMcpSmoke(result: SmokeResult): string {
 		`Staged cycle: ${result.stagedCycleWorked ? "PASS" : "FAIL"}`,
 		`Benchmark lane compare: ${result.benchmarkLaneCompareWorked ? "PASS" : "FAIL"}`,
 		`Benchmark lane score: ${result.benchmarkLaneScoreWorked ? "PASS" : "FAIL"}`,
+		`Long-session benchmark score: ${result.longSessionBenchmarkScoreWorked ? "PASS" : "FAIL"}`,
 		`SCBench starter runbook: ${result.slopcodeStarterRunbookWorked ? "PASS" : "FAIL"}`,
+		`SCBench starter summary: ${result.slopcodeStarterSummaryWorked ? "PASS" : "FAIL"}`,
 		`Review drift fallback: ${result.reviewDriftFallbackWorked ? "PASS" : "FAIL"}`,
 		`Profile build: ${result.profileBuilt ? "PASS" : "FAIL"}`,
 		`Gap audit: ${result.gapAuditWorked ? "PASS" : "FAIL"}`,
@@ -688,7 +737,9 @@ async function main(): Promise<void> {
 			result.stagedCycleWorked &&
 			result.benchmarkLaneCompareWorked &&
 			result.benchmarkLaneScoreWorked &&
+			result.longSessionBenchmarkScoreWorked &&
 			result.slopcodeStarterRunbookWorked &&
+			result.slopcodeStarterSummaryWorked &&
 			result.reviewDriftFallbackWorked &&
 			result.profileBuilt &&
 			result.gapAuditWorked &&
