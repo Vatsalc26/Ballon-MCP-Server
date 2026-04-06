@@ -33,13 +33,13 @@ Treat it as valuable and reputable, but not guaranteed.
 
 This is a real third-party discovery and publishing surface.
 
-It is worth listing there after the official registry, especially because users can discover and connect to servers there from MCP clients.
+It is worth listing there after the official registry.
 
 ### Glama
 
 This is also a real third-party directory and worth listing after the official and curated surfaces.
 
-It is especially useful for browse-style discovery because it has a large searchable MCP directory.
+It is useful for browse-style discovery.
 
 ### Community lists
 
