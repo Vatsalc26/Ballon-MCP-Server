@@ -31,6 +31,7 @@ All notable public changes to Balloon MCP should be recorded in this file.
 25. added registry-oriented package metadata and a committed `server.json` for Official MCP Registry prep
 26. added private maintainer playbooks for GitHub issue workflow, Official MCP Registry prep, and Anthropic directory prep
 27. polished the public README with Balloon branding assets and clearer launch-facing framing
+28. added a GitHub Actions npm trusted-publishing workflow for safer future package releases
 
 ## 0.1.0-alpha.0 - 2026-04-05
 
