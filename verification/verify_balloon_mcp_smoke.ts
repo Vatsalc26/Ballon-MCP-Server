@@ -787,13 +787,16 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 		})) as {
 			structuredContent?: {
 				coveredProblems?: number
-				problems?: Array<{ problemName?: string; sessionPresent?: boolean; scoreResult?: { topLanes?: string[] } }>
+				evidenceSummary?: { liveCoveredProblems?: number; problems?: Array<{ coverage?: string }> }
+				problems?: Array<{ problemName?: string; sessionPresent?: boolean; scoreResult?: { topLanes?: string[] }; evidenceSummary?: { coverage?: string } }>
 			}
 		}
 		const slopcodeStarterSummaryWorked =
 			(starterSuiteSummary.structuredContent?.coveredProblems ?? 0) >= 0 &&
+			(starterSuiteSummary.structuredContent?.evidenceSummary?.liveCoveredProblems ?? 0) === 0 &&
 			starterSuiteSummary.structuredContent?.problems?.[0]?.problemName === "execution_server" &&
-			(starterSuiteSummary.structuredContent?.problems?.[0]?.sessionPresent ?? false) === false
+			(starterSuiteSummary.structuredContent?.problems?.[0]?.sessionPresent ?? false) === false &&
+			starterSuiteSummary.structuredContent?.problems?.[0]?.evidenceSummary?.coverage === "not_run"
 		details.push(`slopcodeStarterSummaryWorked=${slopcodeStarterSummaryWorked ? "yes" : "no"}`)
 
 		await client.request("tools/call", {
@@ -841,67 +844,6 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			},
 		})
 
-		const starterArtifactOutputDir = path.join(dataDir, "starter-artifacts")
-		const starterArtifactExport = (await client.request("tools/call", {
-			name: "balloon_export_slopcode_starter_artifacts",
-			arguments: {
-				problemNames: ["file_backup"],
-				outputDir: starterArtifactOutputDir,
-				semanticAdapterPath: "./examples/semantic_cara_adapter.example.mjs",
-				forceStageCount: 3,
-			},
-		})) as {
-			structuredContent?: {
-				outputDir?: string
-				summaryJsonPath?: string
-				summaryMarkdownPath?: string
-				coveredProblems?: number
-				pressureAlerts?: string[]
-				problems?: Array<{ problemName?: string; covered?: boolean; jsonPath?: string; markdownPath?: string; pressureAlerts?: string[]; highPressureCheckpoints?: number[] }>
-			}
-		}
-		const exportedProblem = starterArtifactExport.structuredContent?.problems?.[0]
-		const summaryJsonPath = starterArtifactExport.structuredContent?.summaryJsonPath
-		const summaryMarkdownPath = starterArtifactExport.structuredContent?.summaryMarkdownPath
-		const exportedProblemJsonPath = exportedProblem?.jsonPath
-		const exportedProblemMarkdownPath = exportedProblem?.markdownPath
-		const slopcodeStarterArtifactExportWorked =
-			starterArtifactExport.structuredContent?.coveredProblems === 1 &&
-			(starterArtifactExport.structuredContent?.pressureAlerts?.length ?? 0) >= 1 &&
-			typeof summaryJsonPath === "string" &&
-			typeof summaryMarkdownPath === "string" &&
-			typeof exportedProblemJsonPath === "string" &&
-			typeof exportedProblemMarkdownPath === "string" &&
-			exportedProblem?.problemName === "file_backup" &&
-			exportedProblem?.covered === true &&
-			(exportedProblem?.pressureAlerts?.length ?? 0) >= 1 &&
-			(exportedProblem?.highPressureCheckpoints?.length ?? 0) >= 1 &&
-			fs.existsSync(summaryJsonPath) &&
-			fs.existsSync(summaryMarkdownPath) &&
-			fs.existsSync(exportedProblemJsonPath) &&
-			fs.existsSync(exportedProblemMarkdownPath)
-		details.push(`slopcodeStarterArtifactExportWorked=${slopcodeStarterArtifactExportWorked ? "yes" : "no"}`)
-
-		const problemPreparation = (await client.request("tools/call", {
-			name: "balloon_prepare_slopcode_problem",
-			arguments: {
-				problemName: "file_backup",
-			},
-		})) as {
-			structuredContent?: {
-				problemName?: string
-				entry?: { checkpointCount?: number }
-				recommendedSessionId?: string
-				checkpointFiles?: Array<{ checkpoint?: number }>
-			}
-		}
-		const slopcodeProblemPrepWorked =
-			problemPreparation.structuredContent?.problemName === "file_backup" &&
-			(problemPreparation.structuredContent?.entry?.checkpointCount ?? 0) >= 4 &&
-			Boolean(problemPreparation.structuredContent?.recommendedSessionId?.includes("scbench-file-backup")) &&
-			(problemPreparation.structuredContent?.checkpointFiles?.length ?? 0) >= 4
-		details.push(`slopcodeProblemPrepWorked=${slopcodeProblemPrepWorked ? "yes" : "no"}`)
-
 		const recordedSlopCodeEvidence = (await client.request("tools/call", {
 			name: "balloon_record_slopcode_run_evidence",
 			arguments: {
@@ -931,6 +873,83 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			recordedSlopCodeEvidence.structuredContent?.checkpointMode === "assistant_checkpoint" &&
 			(recordedSlopCodeEvidence.structuredContent?.checkpoints?.length ?? 0) === 3
 		details.push(`slopcodeEvidenceRecordWorked=${slopcodeEvidenceRecordWorked ? "yes" : "no"}`)
+
+		const starterArtifactOutputDir = path.join(dataDir, "starter-artifacts")
+		const starterArtifactExport = (await client.request("tools/call", {
+			name: "balloon_export_slopcode_starter_artifacts",
+			arguments: {
+				problemNames: ["file_backup"],
+				outputDir: starterArtifactOutputDir,
+				semanticAdapterPath: "./examples/semantic_cara_adapter.example.mjs",
+				forceStageCount: 3,
+			},
+		})) as {
+			structuredContent?: {
+				outputDir?: string
+				summaryJsonPath?: string
+				summaryMarkdownPath?: string
+				coveredProblems?: number
+				evidenceSummary?: { liveCoveredProblems?: number }
+				evidenceAlerts?: string[]
+				pressureAlerts?: string[]
+				problems?: Array<{
+					problemName?: string
+					covered?: boolean
+					evidenceSummary?: { coverage?: string; totalRuns?: number }
+					evidenceAlerts?: string[]
+					jsonPath?: string
+					markdownPath?: string
+					pressureAlerts?: string[]
+					highPressureCheckpoints?: number[]
+				}>
+			}
+		}
+		const exportedProblem = starterArtifactExport.structuredContent?.problems?.[0]
+		const summaryJsonPath = starterArtifactExport.structuredContent?.summaryJsonPath
+		const summaryMarkdownPath = starterArtifactExport.structuredContent?.summaryMarkdownPath
+		const exportedProblemJsonPath = exportedProblem?.jsonPath
+		const exportedProblemMarkdownPath = exportedProblem?.markdownPath
+		const slopcodeStarterArtifactExportWorked =
+			starterArtifactExport.structuredContent?.coveredProblems === 1 &&
+			(starterArtifactExport.structuredContent?.evidenceSummary?.liveCoveredProblems ?? 0) === 0 &&
+			(starterArtifactExport.structuredContent?.evidenceAlerts?.length ?? 0) >= 1 &&
+			(starterArtifactExport.structuredContent?.pressureAlerts?.length ?? 0) >= 1 &&
+			typeof summaryJsonPath === "string" &&
+			typeof summaryMarkdownPath === "string" &&
+			typeof exportedProblemJsonPath === "string" &&
+			typeof exportedProblemMarkdownPath === "string" &&
+			exportedProblem?.problemName === "file_backup" &&
+			exportedProblem?.covered === true &&
+			exportedProblem?.evidenceSummary?.coverage === "non_live_only" &&
+			(exportedProblem?.evidenceSummary?.totalRuns ?? 0) >= 1 &&
+			(exportedProblem?.evidenceAlerts?.length ?? 0) >= 1 &&
+			(exportedProblem?.pressureAlerts?.length ?? 0) >= 1 &&
+			(exportedProblem?.highPressureCheckpoints?.length ?? 0) >= 1 &&
+			fs.existsSync(summaryJsonPath) &&
+			fs.existsSync(summaryMarkdownPath) &&
+			fs.existsSync(exportedProblemJsonPath) &&
+			fs.existsSync(exportedProblemMarkdownPath)
+		details.push(`slopcodeStarterArtifactExportWorked=${slopcodeStarterArtifactExportWorked ? "yes" : "no"}`)
+
+		const problemPreparation = (await client.request("tools/call", {
+			name: "balloon_prepare_slopcode_problem",
+			arguments: {
+				problemName: "file_backup",
+			},
+		})) as {
+			structuredContent?: {
+				problemName?: string
+				entry?: { checkpointCount?: number }
+				recommendedSessionId?: string
+				checkpointFiles?: Array<{ checkpoint?: number }>
+			}
+		}
+		const slopcodeProblemPrepWorked =
+			problemPreparation.structuredContent?.problemName === "file_backup" &&
+			(problemPreparation.structuredContent?.entry?.checkpointCount ?? 0) >= 4 &&
+			Boolean(problemPreparation.structuredContent?.recommendedSessionId?.includes("scbench-file-backup")) &&
+			(problemPreparation.structuredContent?.checkpointFiles?.length ?? 0) >= 4
+		details.push(`slopcodeProblemPrepWorked=${slopcodeProblemPrepWorked ? "yes" : "no"}`)
 
 		const slopcodeEvidenceSummary = (await client.request("tools/call", {
 			name: "balloon_summarize_slopcode_run_evidence",

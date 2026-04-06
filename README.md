@@ -233,7 +233,7 @@ If you want Balloon to generate or sanity-check a host config packet, use `ballo
 
 If you want the first real SlopCodeBench starter-suite workflow, use `balloon_describe_slopcode_starter_suite` and `balloon_prepare_slopcode_problem`.
 
-If you want repo-backed SCBench summary bundles, use `balloon_export_slopcode_starter_artifacts`.
+If you want repo-backed SCBench summary bundles, use `balloon_export_slopcode_starter_artifacts`. Those exports now include both pressure traces and live-vs-replay evidence coverage.
 
 If you want to keep benchmark claims honest, record whether a run was truly live with `balloon_record_slopcode_run_evidence`, summarize it with `balloon_summarize_slopcode_run_evidence`, and inspect `balloon://benchmark/slopcode/evidence`.
 

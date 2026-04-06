@@ -84,7 +84,7 @@ Use `balloon_score_long_session_benchmark` when you want the same checkpoints sc
 
 Use `balloon_export_slopcode_starter_artifacts` when you want JSON and Markdown summaries written to disk for repo-backed benchmark tracking.
 
-Those artifact exports now include pressure-trace summaries too, so you can see which starter problems kept rising, which ones settled, and where high-pressure checkpoints still remain.
+Those artifact exports now include pressure-trace summaries and live-vs-replay evidence coverage, so you can see which starter problems kept rising, which ones settled, and which ones still do not have true live benchmark evidence yet.
 
 Use `balloon_record_slopcode_run_evidence` right after a rerun so the benchmark ledger says whether the run came from a real live LLM host session, a manual replay, a fixture, or a synthetic demo.
 

@@ -1091,6 +1091,11 @@ function buildSlopCodeStarterSuiteSummary(
 	const datasetRoot = options.datasetRoot ?? undefined
 	const plan = buildSlopCodeStarterBenchmarkPlan(datasetRoot)
 	const selectedProblems = options.problemNames && options.problemNames.length > 0 ? new Set(options.problemNames) : null
+	const evidenceSummary = buildSlopCodeEvidenceSummary(
+		store,
+		selectedProblems ? Array.from(selectedProblems) : plan.problems.map((problem) => problem.problemName),
+	)
+	const evidenceByProblem = new Map(evidenceSummary.problems.map((problem) => [problem.problemName, problem]))
 	const problems = plan.problems
 		.filter((problem) => (selectedProblems ? selectedProblems.has(problem.problemName) : true))
 		.map((problem) => {
@@ -1118,6 +1123,25 @@ function buildSlopCodeStarterSuiteSummary(
 				sessionPresent: sessionTurns.length > 0,
 				executedCheckpoints: scoreResult ? scoreResult.executedCheckpoints.map((checkpoint) => checkpoint.actualTurnCount) : [],
 				scoreResult,
+				evidenceSummary:
+					evidenceByProblem.get(problem.problemName) ??
+					({
+						problemName: problem.problemName,
+						totalRuns: 0,
+						liveRuns: 0,
+						manualReplayRuns: 0,
+						fixtureRuns: 0,
+						syntheticDemoRuns: 0,
+						coverage: "not_run",
+						latestEvidenceKind: null,
+						latestHost: null,
+						latestProvider: null,
+						latestModel: null,
+						latestSessionId: null,
+						latestRecordedAt: null,
+						notes: ["No recorded evidence exists for this problem yet."],
+						recentRuns: [],
+					} satisfies BalloonSlopCodeProblemEvidenceSummary),
 				warnings,
 			}
 		})
@@ -1138,6 +1162,7 @@ function buildSlopCodeStarterSuiteSummary(
 		coveredProblems: problems.filter((problem) => problem.scoreResult !== null).length,
 		laneTotals,
 		topLanes: topLanesFromTotals(laneTotals),
+		evidenceSummary,
 		problems,
 	}
 }
@@ -1203,11 +1228,17 @@ function formatSlopCodeStarterSuiteSummary(summary: SlopCodeStarterSuiteSummary)
 		formatSlopCodeDatasetStatus(summary.datasetStatus),
 		"",
 		`Covered problems: ${summary.coveredProblems}/${summary.totalProblems}`,
+		`Problems with live evidence: ${summary.evidenceSummary.liveCoveredProblems}/${summary.totalProblems}`,
 		`Top lane(s): ${summary.topLanes.join(", ") || "none"}`,
 		`Baseline total: ${summary.laneTotals.baseline}/${summary.laneTotals.maxTotal}`,
 		`Deterministic total: ${summary.laneTotals.deterministic}/${summary.laneTotals.maxTotal}`,
 		`Assist total: ${summary.laneTotals.assist}/${summary.laneTotals.maxTotal}`,
 		`Staged total: ${summary.laneTotals.staged}/${summary.laneTotals.maxTotal}`,
+		"",
+		"Evidence risks",
+		...(summary.evidenceSummary.openRisks.length > 0
+			? summary.evidenceSummary.openRisks.map((risk, index) => `${index + 1}. ${risk}`)
+			: ["None recorded."]),
 		"",
 		...summary.problems.flatMap((problem, index) => [
 			`${index + 1}. ${problem.problemName}`,
@@ -1215,6 +1246,9 @@ function formatSlopCodeStarterSuiteSummary(summary: SlopCodeStarterSuiteSummary)
 			`Session present: ${problem.sessionPresent ? "yes" : "no"}`,
 			`Recommended checkpoints: ${problem.recommendedCheckpoints.join(", ")}`,
 			`Executed checkpoints: ${problem.executedCheckpoints.length > 0 ? problem.executedCheckpoints.join(", ") : "none"}`,
+			`Evidence coverage: ${problem.evidenceSummary.coverage}`,
+			`Evidence runs: ${problem.evidenceSummary.totalRuns}`,
+			`Live runs: ${problem.evidenceSummary.liveRuns}`,
 			...(problem.scoreResult
 				? [
 						`Top lane(s): ${problem.scoreResult.topLanes.join(", ")}`,
@@ -1225,6 +1259,9 @@ function formatSlopCodeStarterSuiteSummary(summary: SlopCodeStarterSuiteSummary)
 						...formatPressureSummaryBlock(buildArtifactPressureSummary(problem.scoreResult)),
 					]
 				: ["Score summary: not available yet"]),
+			...(problem.evidenceSummary.notes.length > 0
+				? problem.evidenceSummary.notes.map((note, noteIndex) => `Evidence note ${noteIndex + 1}: ${note}`)
+				: []),
 			...(problem.warnings.length > 0 ? problem.warnings.map((warning, warningIndex) => `Warning ${warningIndex + 1}: ${warning}`) : []),
 			"",
 		]),
@@ -1369,11 +1406,35 @@ function formatSlopCodeEvidenceSummary(summary: BalloonSlopCodeEvidenceSummary):
 	].join("\n")
 }
 
+function formatProblemEvidenceSummaryBlock(summary: BalloonSlopCodeProblemEvidenceSummary): string[] {
+	return [
+		`Evidence coverage: ${summary.coverage}`,
+		`Evidence runs: ${summary.totalRuns}`,
+		`Live runs: ${summary.liveRuns}`,
+		`Manual replay runs: ${summary.manualReplayRuns}`,
+		`Fixture runs: ${summary.fixtureRuns}`,
+		`Synthetic demo runs: ${summary.syntheticDemoRuns}`,
+		`Latest evidence kind: ${summary.latestEvidenceKind ?? "none"}`,
+		`Latest host: ${summary.latestHost ?? "none"}`,
+		`Latest model: ${summary.latestModel ?? "none"}`,
+	]
+}
+
+function collectProblemEvidenceAlerts(summary: BalloonSlopCodeProblemEvidenceSummary): string[] {
+	return uniqueStrings([
+		...(summary.coverage === "not_run" ? ["No recorded evidence exists for this problem yet."] : []),
+		...(summary.coverage === "non_live_only" ? ["Only non-live evidence is recorded so far; do not treat this as a true benchmark result yet."] : []),
+		...summary.notes,
+	])
+}
+
 type StarterSuiteArtifactProblemExport = {
 	problemName: string
 	sessionId: string
 	sessionPresent: boolean
 	covered: boolean
+	evidenceSummary: BalloonSlopCodeProblemEvidenceSummary
+	evidenceAlerts: string[]
 	executedCheckpoints: number[]
 	topLanes: Array<BalloonBenchmarkLaneScore["lane"]>
 	laneTotals: BalloonBenchmarkLaneTotals | null
@@ -1394,6 +1455,8 @@ type StarterSuiteArtifactExportBundle = {
 	datasetStatus: SlopCodeStarterSuiteSummary["datasetStatus"]
 	totalProblems: number
 	coveredProblems: number
+	evidenceSummary: BalloonSlopCodeEvidenceSummary
+	evidenceAlerts: string[]
 	laneTotals: BalloonBenchmarkLaneTotals
 	topLanes: Array<BalloonBenchmarkLaneScore["lane"]>
 	pressureAlerts: string[]
@@ -1521,9 +1584,10 @@ function formatStarterSuiteArtifactProblemMarkdown(options: {
 	regressions: string[]
 	pressureSummary: StarterSuiteArtifactPressureSummary | null
 	pressureAlerts: string[]
+	evidenceAlerts: string[]
 	generatedAt: string
 }): string {
-	const { problem, regressions, pressureSummary, pressureAlerts, generatedAt } = options
+	const { problem, regressions, pressureSummary, pressureAlerts, evidenceAlerts, generatedAt } = options
 	return [
 		`# SCBench Starter Artifact: ${problem.problemName}`,
 		"",
@@ -1538,6 +1602,12 @@ function formatStarterSuiteArtifactProblemMarkdown(options: {
 		"",
 		"Top lane(s)",
 		problem.scoreResult?.topLanes.join(", ") || "none",
+		"",
+		"Evidence",
+		...formatProblemEvidenceSummaryBlock(problem.evidenceSummary),
+		"",
+		"Evidence alerts",
+		...(evidenceAlerts.length > 0 ? evidenceAlerts.map((note, index) => `${index + 1}. ${note}`) : ["None recorded."]),
 		"",
 		"Pressure trace",
 		...formatPressureSummaryBlock(pressureSummary),
@@ -1565,8 +1635,12 @@ function formatStarterSuiteArtifactSummaryMarkdown(bundle: StarterSuiteArtifactE
 		formatSlopCodeDatasetStatus(bundle.datasetStatus),
 		"",
 		`Covered problems: ${bundle.coveredProblems}/${bundle.totalProblems}`,
+		`Problems with live evidence: ${bundle.evidenceSummary.liveCoveredProblems}/${bundle.totalProblems}`,
 		`Top lane(s): ${bundle.topLanes.join(", ") || "none"}`,
 		...formatLaneTotalsBlock(bundle.laneTotals),
+		"",
+		"Evidence risks",
+		...(bundle.evidenceAlerts.length > 0 ? bundle.evidenceAlerts.map((note, index) => `${index + 1}. ${note}`) : ["None recorded."]),
 		"",
 		"Suite pressure alerts",
 		...(bundle.pressureAlerts.length > 0 ? bundle.pressureAlerts.map((note, index) => `${index + 1}. ${note}`) : ["None recorded."]),
@@ -1579,9 +1653,11 @@ function formatStarterSuiteArtifactSummaryMarkdown(bundle: StarterSuiteArtifactE
 			`${index + 1}. ${problem.problemName}`,
 			`Session id: ${problem.sessionId}`,
 			`Covered: ${problem.covered ? "yes" : "no"}`,
+			`Evidence coverage: ${problem.evidenceSummary.coverage}`,
 			`JSON: ${problem.jsonPath}`,
 			`Markdown: ${problem.markdownPath}`,
 			`Top lane(s): ${problem.topLanes.join(", ") || "none"}`,
+			...(problem.evidenceAlerts.length > 0 ? problem.evidenceAlerts.map((note, noteIndex) => `Evidence ${noteIndex + 1}: ${note}`) : []),
 			...(problem.pressureAlerts.length > 0 ? problem.pressureAlerts.map((note, noteIndex) => `Pressure ${noteIndex + 1}: ${note}`) : []),
 			...(problem.regressions.length > 0 ? problem.regressions.map((note, noteIndex) => `Regression ${noteIndex + 1}: ${note}`) : []),
 			...(problem.warnings.length > 0 ? problem.warnings.map((warning, warningIndex) => `Warning ${warningIndex + 1}: ${warning}`) : []),
@@ -1610,23 +1686,31 @@ function buildStarterSuiteArtifactExport(
 		const regressions = problem.scoreResult ? collectLaneRegressions(problem.scoreResult.laneTotals) : []
 		const pressureSummary = buildArtifactPressureSummary(problem.scoreResult)
 		const pressureAlerts = collectPressureAlerts(pressureSummary)
+		const evidenceAlerts = collectProblemEvidenceAlerts(problem.evidenceSummary)
 		const problemStem = safeArtifactName(problem.problemName)
 		const jsonPath = path.join(problemsDir, `${problemStem}.json`)
 		const markdownPath = path.join(problemsDir, `${problemStem}.md`)
 		const payload = {
 			generatedAt,
 			problem,
+			evidenceAlerts,
 			pressureSummary,
 			pressureAlerts,
 			regressions,
 		}
 		fs.writeFileSync(jsonPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8")
-		fs.writeFileSync(markdownPath, `${formatStarterSuiteArtifactProblemMarkdown({ problem, regressions, pressureSummary, pressureAlerts, generatedAt })}\n`, "utf8")
+		fs.writeFileSync(
+			markdownPath,
+			`${formatStarterSuiteArtifactProblemMarkdown({ problem, regressions, pressureSummary, pressureAlerts, evidenceAlerts, generatedAt })}\n`,
+			"utf8",
+		)
 		return {
 			problemName: problem.problemName,
 			sessionId: problem.sessionId,
 			sessionPresent: problem.sessionPresent,
 			covered: problem.scoreResult !== null,
+			evidenceSummary: problem.evidenceSummary,
+			evidenceAlerts,
 			executedCheckpoints: problem.executedCheckpoints,
 			topLanes: problem.scoreResult?.topLanes ?? [],
 			laneTotals: problem.scoreResult?.laneTotals ?? null,
@@ -1642,6 +1726,7 @@ function buildStarterSuiteArtifactExport(
 
 	const regressions = collectLaneRegressions(summary.laneTotals)
 	const pressureAlerts = collectSuitePressureAlerts(exportedProblems)
+	const evidenceAlerts = uniqueStrings(summary.evidenceSummary.openRisks)
 	const summaryJsonPath = path.join(outputDir, "summary.json")
 	const summaryMarkdownPath = path.join(outputDir, "summary.md")
 	const bundle: StarterSuiteArtifactExportBundle = {
@@ -1652,6 +1737,8 @@ function buildStarterSuiteArtifactExport(
 		datasetStatus: summary.datasetStatus,
 		totalProblems: summary.totalProblems,
 		coveredProblems: summary.coveredProblems,
+		evidenceSummary: summary.evidenceSummary,
+		evidenceAlerts,
 		laneTotals: summary.laneTotals,
 		topLanes: summary.topLanes,
 		pressureAlerts,
@@ -4195,7 +4282,8 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 		{
 			name: "balloon_export_slopcode_starter_artifacts",
 			title: "Export SlopCodeBench Starter Artifacts",
-			description: "Writes starter-suite score summaries and per-problem checkpoint artifacts to JSON and Markdown files for repo-backed benchmark tracking.",
+			description:
+				"Writes starter-suite score summaries, evidence coverage, and per-problem checkpoint artifacts to JSON and Markdown files for repo-backed benchmark tracking.",
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 			inputSchema: {
 				type: "object",
@@ -4229,9 +4317,13 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					"",
 					`Output directory: ${bundle.outputDir}`,
 					`Covered problems: ${bundle.coveredProblems}/${bundle.totalProblems}`,
+					`Problems with live evidence: ${bundle.evidenceSummary.liveCoveredProblems}/${bundle.totalProblems}`,
 					`Top lane(s): ${bundle.topLanes.join(", ") || "none"}`,
 					`Summary JSON: ${bundle.summaryJsonPath}`,
 					`Summary Markdown: ${bundle.summaryMarkdownPath}`,
+					"",
+					"Evidence risks",
+					...(bundle.evidenceAlerts.length > 0 ? bundle.evidenceAlerts.map((note, index) => `${index + 1}. ${note}`) : ["None recorded."]),
 					"",
 					"Suite pressure alerts",
 					...(bundle.pressureAlerts.length > 0 ? bundle.pressureAlerts.map((note, index) => `${index + 1}. ${note}`) : ["None recorded."]),
@@ -4243,8 +4335,10 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					...bundle.problems.flatMap((problem, index) => [
 						`${index + 1}. ${problem.problemName}`,
 						`Covered: ${problem.covered ? "yes" : "no"}`,
+						`Evidence coverage: ${problem.evidenceSummary.coverage}`,
 						`JSON: ${problem.jsonPath}`,
 						`Markdown: ${problem.markdownPath}`,
+						...(problem.evidenceAlerts.length > 0 ? problem.evidenceAlerts.map((note, noteIndex) => `Evidence ${noteIndex + 1}: ${note}`) : []),
 						...(problem.pressureAlerts.length > 0 ? problem.pressureAlerts.map((note, noteIndex) => `Pressure ${noteIndex + 1}: ${note}`) : []),
 						...(problem.regressions.length > 0 ? problem.regressions.map((note, noteIndex) => `Regression ${noteIndex + 1}: ${note}`) : []),
 					]),

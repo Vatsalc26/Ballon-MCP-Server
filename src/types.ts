@@ -395,6 +395,7 @@ export interface SlopCodeStarterSuiteProblemSummary {
 	sessionPresent: boolean
 	executedCheckpoints: number[]
 	scoreResult: LongSessionBenchmarkScoreResult | null
+	evidenceSummary: BalloonSlopCodeProblemEvidenceSummary
 	warnings: string[]
 }
 
@@ -405,6 +406,7 @@ export interface SlopCodeStarterSuiteSummary {
 	coveredProblems: number
 	laneTotals: BalloonBenchmarkLaneTotals
 	topLanes: Array<BalloonBenchmarkLaneScore["lane"]>
+	evidenceSummary: BalloonSlopCodeEvidenceSummary
 	problems: SlopCodeStarterSuiteProblemSummary[]
 }
 

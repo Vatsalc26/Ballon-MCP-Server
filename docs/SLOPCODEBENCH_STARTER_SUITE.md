@@ -97,6 +97,8 @@ The starter suite now has both:
 5. a suite summary tool
 6. an artifact export tool
 
+That export bundle now carries both score/pressure data and evidence coverage, so the summary itself can show whether a problem has true live reruns yet.
+
 So contributors can move from dataset verification to repeatable scoring without inventing their own process each time.
 
 ## Claim Boundary
