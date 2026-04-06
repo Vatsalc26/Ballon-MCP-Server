@@ -8,7 +8,7 @@
   <a href="./docs/READINESS.md"><img alt="Status: Public Alpha" src="https://img.shields.io/badge/status-public%20alpha-0f766e" /></a>
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1f2937" /></a>
   <a href="./docs/HOST_COMPATIBILITY.md"><img alt="Hosts: VS Code first" src="https://img.shields.io/badge/hosts-VS%20Code%20first-2563eb" /></a>
-  <a href="./docs/LONG_SESSION_BENCHMARK.md"><img alt="Benchmarks: 4 lanes + long session" src="https://img.shields.io/badge/benchmarks-4%20lanes%20%2B%20long%20session-f59e0b" /></a>
+  <a href="./docs/LONG_SESSION_BENCHMARK.md"><img alt="Evidence: 4-lane and long-session benchmark paths" src="https://img.shields.io/badge/evidence-4%20lane%20%2B%20long%20session-f59e0b" /></a>
 </p>
 
 Balloon MCP is an MCP server for monitoring context fidelity in long AI sessions.
