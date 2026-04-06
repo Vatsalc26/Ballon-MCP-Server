@@ -1,15 +1,43 @@
 {
   "name": "balloon-mcp-server",
   "version": "0.1.0-alpha.0",
+  "mcpName": "io.github.vatsalc26/balloon-mcp",
   "description": "Balloon MCP Server - context-fidelity sidecar for long AI sessions",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Vatsalc26/Ballon-MCP-Server.git"
+  },
+  "homepage": "https://github.com/Vatsalc26/Ballon-MCP-Server#readme",
+  "bugs": {
+    "url": "https://github.com/Vatsalc26/Ballon-MCP-Server/issues"
+  },
   "main": "dist/src/start.js",
+  "bin": {
+    "balloon-mcp-server": "dist/src/start.js"
+  },
   "files": [
     "dist/",
     "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
     "LICENSE",
+    "SECURITY.md",
+    "SUPPORT.md",
     "docs/",
-    "examples/"
+    "examples/",
+    "server.json"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "balloon",
+    "anti-drift",
+    "context-fidelity",
+    "ai"
   ],
   "engines": {
     "node": ">=24.14.0 <25"

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.vatsalc26/balloon-mcp",
+  "title": "Balloon MCP",
+  "description": "An anti-drift MCP server for long AI sessions with deterministic, assist, and staged external correction lanes.",
+  "repository": {
+    "url": "https://github.com/Vatsalc26/Ballon-MCP-Server",
+    "source": "github"
+  },
+  "version": "0.1.0-alpha.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "balloon-mcp-server",
+      "version": "0.1.0-alpha.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

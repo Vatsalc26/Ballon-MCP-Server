@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Support guide
+    url: https://github.com/Vatsalc26/Ballon-MCP-Server/blob/main/SUPPORT.md
+    about: Use this before opening a support-style issue so the issue queue stays clean and legible.
   - name: Security policy
     url: https://github.com/Vatsalc26/Ballon-MCP-Server/blob/main/SECURITY.md
     about: Please do not file public security issues. Use the security policy path instead.

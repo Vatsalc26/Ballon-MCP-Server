@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import minimist from "minimist"
 import { BalloonMcpServer } from "./BalloonMcpServer"
 import { BalloonStateStore, createDefaultBalloonDbPath } from "./BalloonStateStore"

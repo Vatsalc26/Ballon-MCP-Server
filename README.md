@@ -194,6 +194,7 @@ If the demo feels good, the important part is not that Balloon produced more tex
 15. [Architecture roadmap](./docs/ROADMAP.md)
 16. [Contributing](./CONTRIBUTING.md)
 17. [Security policy](./SECURITY.md)
+18. [Support](./SUPPORT.md)
 
 ## Good Fit
 

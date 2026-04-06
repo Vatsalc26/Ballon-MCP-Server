@@ -27,6 +27,9 @@ All notable public changes to Balloon MCP should be recorded in this file.
 21. added `verify_slopcodebench_starter_suite` plus starter-suite docs/examples for `file_backup`, `execution_server`, and `trajectory_api`
 22. tightened the public issue surface with benchmark and host-compatibility templates plus contributor-starter guidance
 23. added a public MCP listings guide so registry and directory submissions stay honest and repeatable
+24. added a public support guide so issue-driven alpha support is explicit
+25. added registry-oriented package metadata and a committed `server.json` for Official MCP Registry prep
+26. added private maintainer playbooks for GitHub issue workflow, Official MCP Registry prep, and Anthropic directory prep
 
 ## 0.1.0-alpha.0 - 2026-04-05
 
