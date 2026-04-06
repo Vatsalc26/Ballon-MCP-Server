@@ -212,6 +212,42 @@ export interface SlopCodeStarterSuiteResult {
 	entries: SlopCodeStarterSuiteEntry[]
 }
 
+export interface BalloonBenchmarkScoreDimension {
+	key: "constraint_preservation" | "architecture_preservation" | "verification_carry_forward" | "omission_recovery" | "boundedness" | "clarity"
+	label: string
+	description: string
+}
+
+export interface BalloonBenchmarkDimensionScore {
+	key: BalloonBenchmarkScoreDimension["key"]
+	label: string
+	score: number
+	rationale: string
+}
+
+export interface BalloonBenchmarkLaneScore {
+	lane: "baseline" | "deterministic" | "assist" | "staged"
+	total: number
+	maxTotal: number
+	dimensionScores: BalloonBenchmarkDimensionScore[]
+	summary: string
+}
+
+export interface BalloonBenchmarkScorecard {
+	sessionId: string
+	dimensions: BalloonBenchmarkScoreDimension[]
+	baseline: BalloonBenchmarkLaneScore
+	deterministic: BalloonBenchmarkLaneScore
+	assist: BalloonBenchmarkLaneScore
+	staged: BalloonBenchmarkLaneScore
+	topLanes: Array<BalloonBenchmarkLaneScore["lane"]>
+	deltas: {
+		deterministicVsBaseline: number
+		assistVsDeterministic: number
+		stagedVsDeterministic: number
+	}
+}
+
 export interface SlopCodeProblemPreparation {
 	problemName: string
 	datasetStatus: SlopCodeDatasetStatus
@@ -225,6 +261,31 @@ export interface SlopCodeProblemPreparation {
 	recommendedSessionId: string
 	recommendedInstructions: string[]
 	suggestedCompareBenchmarkPrompt: string
+}
+
+export interface SlopCodeStarterBenchmarkProblemPlan {
+	problemName: string
+	category: string
+	difficulty: string
+	recommendedSessionId: string
+	recommendedCheckpointBatch: number[]
+	recommendedForceStageCount: number
+	recommendedLongSessionThresholds: number[]
+	scoreFocus: string[]
+	successSignals: string[]
+	suggestedCompareBenchmarkPrompt: string
+	suggestedScorePrompt: string
+	suggestedLongSessionPrompt: string
+}
+
+export interface SlopCodeStarterBenchmarkPlan {
+	suiteName: string
+	datasetStatus: SlopCodeDatasetStatus
+	executionOrder: string[]
+	scoreDimensions: BalloonBenchmarkScoreDimension[]
+	runChecklist: string[]
+	communicationBoundaries: string[]
+	problems: SlopCodeStarterBenchmarkProblemPlan[]
 }
 
 export interface BalloonSessionSummary {

@@ -31,18 +31,23 @@ Good for preserving API boundaries, validation rules, concurrency discipline, an
 Use:
 
 1. `balloon_describe_slopcode_starter_suite`
-2. `balloon_prepare_slopcode_problem`
-3. `balloon://benchmark/slopcode/starter-suite`
-4. `balloon://benchmark/slopcode/problems/{problemName}`
+2. `balloon_plan_slopcode_starter_benchmark`
+3. `balloon_prepare_slopcode_problem`
+4. `balloon_score_benchmark_lanes`
+5. `balloon://benchmark/slopcode/starter-suite`
+6. `balloon://benchmark/slopcode/starter-suite/runbook`
+7. `balloon://benchmark/slopcode/problems/{problemName}`
 
 ## Fast Starter Workflow
 
 1. verify your local snapshot with `verify_slopcodebench_dataset`
 2. verify the selected starter problems with `verify_slopcodebench_starter_suite`
 3. inspect the suite with `balloon_describe_slopcode_starter_suite`
-4. inspect one problem with `balloon_prepare_slopcode_problem`
-5. run the checkpoint sequence in your host
-6. score `baseline / deterministic / assist / staged`
+4. build the runbook with `balloon_plan_slopcode_starter_benchmark`
+5. inspect one problem with `balloon_prepare_slopcode_problem`
+6. run the checkpoint sequence in your host
+7. compare lanes with `balloon_compare_benchmark_lanes`
+8. score them with `balloon_score_benchmark_lanes`
 
 ## Recommended First Order
 
@@ -56,7 +61,23 @@ For the first checkpoint-sequence runs:
 
 1. keep `forceStageCount: 3`
 2. score the opening, middle, and late checkpoint of each problem
-3. keep claims modest and reproducible
+3. keep the same score dimensions every time:
+4. constraint preservation
+5. architecture preservation
+6. verification carry-forward
+7. omission recovery
+8. boundedness
+9. clarity
+10. keep claims modest and reproducible
+
+## Why The New Runbook Matters
+
+The starter suite now has both:
+
+1. a runbook tool
+2. a scorecard tool
+
+So contributors can move from dataset verification to repeatable scoring without inventing their own process each time.
 
 ## Claim Boundary
 

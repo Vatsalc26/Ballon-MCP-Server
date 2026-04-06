@@ -1,0 +1,6 @@
+{
+  "tool": "balloon_plan_slopcode_starter_benchmark",
+  "arguments": {
+    "datasetRoot": "..\\slop-code-bench-main"
+  }
+}

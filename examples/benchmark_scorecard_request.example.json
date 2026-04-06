@@ -1,0 +1,9 @@
+{
+  "tool": "balloon_score_benchmark_lanes",
+  "arguments": {
+    "sessionId": "bench-retry-2",
+    "userRequest": "Please add retry logic to the request layer without rewriting the current router. Keep type safety and include tests.",
+    "semanticAdapterPath": ".\\examples\\semantic_cara_adapter.example.mjs",
+    "forceStageCount": 3
+  }
+}

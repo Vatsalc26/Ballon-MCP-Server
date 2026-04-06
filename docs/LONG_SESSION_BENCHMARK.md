@@ -39,7 +39,9 @@ If you want the first recommended real-problem set after verification, use:
 
 1. [SLOPCODEBENCH_STARTER_SUITE.md](./SLOPCODEBENCH_STARTER_SUITE.md)
 2. `balloon_describe_slopcode_starter_suite`
-3. `balloon_prepare_slopcode_problem`
+3. `balloon_plan_slopcode_starter_benchmark`
+4. `balloon_prepare_slopcode_problem`
+5. `balloon_score_benchmark_lanes`
 
 ## What To Measure
 
@@ -99,6 +101,8 @@ That call will return checkpoint batches with:
 3. assist Balloon reply
 4. staged external Balloon reply
 
+If you want the standard six-dimension scorecard immediately after that, run `balloon_score_benchmark_lanes` on the same session.
+
 ## Recommended Staged Profiles
 
 Try:
@@ -114,7 +118,9 @@ Use these starting fixtures:
 2. [../examples/long_session_50_turns.example.json](../examples/long_session_50_turns.example.json)
 3. [../examples/long_session_benchmark_request.example.json](../examples/long_session_benchmark_request.example.json)
 4. [../examples/slopcode_starter_suite_request.example.json](../examples/slopcode_starter_suite_request.example.json)
-5. [../examples/slopcode_problem_prep_request.example.json](../examples/slopcode_problem_prep_request.example.json)
+5. [../examples/slopcode_starter_benchmark_plan_request.example.json](../examples/slopcode_starter_benchmark_plan_request.example.json)
+6. [../examples/slopcode_problem_prep_request.example.json](../examples/slopcode_problem_prep_request.example.json)
+7. [../examples/benchmark_scorecard_request.example.json](../examples/benchmark_scorecard_request.example.json)
 
 They are not "official benchmark wins."
 

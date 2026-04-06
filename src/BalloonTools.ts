@@ -1,5 +1,9 @@
 import type {
 	BalloonGap,
+	BalloonBenchmarkDimensionScore,
+	BalloonBenchmarkLaneScore,
+	BalloonBenchmarkScorecard,
+	BalloonBenchmarkScoreDimension,
 	BalloonSessionSummary,
 	BenchmarkLaneComparison,
 	HiddenRequirement,
@@ -8,6 +12,7 @@ import type {
 	ReleasePacket,
 	RetrievalHit,
 	SemanticCaraResult,
+	SlopCodeStarterBenchmarkPlan,
 	SlopCodeProblemPreparation,
 	SlopCodeStarterSuiteResult,
 	StagedBalloonResult,
@@ -18,7 +23,7 @@ import { auditLatestTurn, buildProxyTrickle, buildStructuredProfile, detectHidde
 import { buildBalloonRepairBundle } from "./BalloonRepair"
 import { buildReviewPromptBundle } from "./BalloonPrompts"
 import { buildStagedBalloonResult } from "./BalloonStaged"
-import { buildSlopCodeProblemPreparation, buildSlopCodeStarterSuite } from "./SlopCodeBench"
+import { buildSlopCodeProblemPreparation, buildSlopCodeStarterBenchmarkPlan, buildSlopCodeStarterSuite, getBenchmarkScoreDimensions } from "./SlopCodeBench"
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 type JsonRecord = Record<string, unknown>
@@ -413,6 +418,345 @@ function formatSlopCodeProblemPreparation(result: SlopCodeProblemPreparation): s
 		"Suggested compare prompt",
 		result.suggestedCompareBenchmarkPrompt,
 		...(result.missingFiles.length > 0 ? ["", "Missing files", ...result.missingFiles.map((file, index) => `${index + 1}. ${file}`)] : []),
+	].join("\n")
+}
+
+function formatSlopCodeStarterBenchmarkPlan(plan: SlopCodeStarterBenchmarkPlan): string {
+	const problemLines = plan.problems.flatMap((problem, index) => [
+		`${index + 1}. ${problem.problemName} [${problem.category}, ${problem.difficulty}]`,
+		`Session id: ${problem.recommendedSessionId}`,
+		`Checkpoint batch: ${problem.recommendedCheckpointBatch.join(", ")}`,
+		`Force stage count: ${problem.recommendedForceStageCount}`,
+		`Long-session thresholds: ${problem.recommendedLongSessionThresholds.join(" / ")}`,
+		`Score focus: ${problem.scoreFocus.join(" | ")}`,
+		`Success signals: ${problem.successSignals.join(" | ")}`,
+	])
+	return [
+		plan.suiteName,
+		"",
+		formatSlopCodeDatasetStatus(plan.datasetStatus),
+		"",
+		"Execution order",
+		...plan.executionOrder.map((problemName, index) => `${index + 1}. ${problemName}`),
+		"",
+		"Score dimensions",
+		...plan.scoreDimensions.map((dimension, index) => `${index + 1}. ${dimension.label} - ${dimension.description}`),
+		"",
+		"Run checklist",
+		...plan.runChecklist.map((item, index) => `${index + 1}. ${item}`),
+		"",
+		"Communication boundaries",
+		...plan.communicationBoundaries.map((item, index) => `${index + 1}. ${item}`),
+		"",
+		"Problem plans",
+		...problemLines,
+	].join("\n")
+}
+
+const BENCHMARK_STOP_WORDS = new Set([
+	"a",
+	"an",
+	"and",
+	"are",
+	"as",
+	"be",
+	"by",
+	"for",
+	"from",
+	"i",
+	"in",
+	"into",
+	"is",
+	"it",
+	"its",
+	"of",
+	"on",
+	"or",
+	"that",
+	"the",
+		"this",
+	"to",
+	"we",
+	"with",
+	"would",
+	"will",
+	"while",
+	"keep",
+	"change",
+	"changes",
+	"step",
+	"steps",
+	"next",
+	"affected",
+	"requested",
+	"latest",
+	"reply",
+	"explicit",
+	"explicitly",
+	"matter",
+	"required",
+])
+
+function normalizeBenchmarkText(value: string): string {
+	return value.toLowerCase()
+}
+
+function extractBenchmarkTerms(value: string): string[] {
+	return normalizeBenchmarkText(value)
+		.split(/[^a-z0-9_./-]+/u)
+		.map((term) => term.trim())
+		.filter((term) => term.length >= 2 && !BENCHMARK_STOP_WORDS.has(term))
+}
+
+function uniqueStrings(values: string[]): string[] {
+	return [...new Set(values.filter((value) => value.trim().length > 0))]
+}
+
+function countMatchedTerms(replyText: string, sourceText: string): { matched: string[]; required: number } {
+	const replyTerms = new Set(extractBenchmarkTerms(replyText))
+	const sourceTerms = extractBenchmarkTerms(sourceText)
+	if (sourceTerms.length === 0) return { matched: [], required: 0 }
+	const matched = sourceTerms.filter((term) => replyTerms.has(term))
+	const required = Math.min(3, Math.max(1, Math.ceil(sourceTerms.length / 2)))
+	return { matched, required }
+}
+
+function replyMatchesConcept(replyText: string, sourceText: string): boolean {
+	const normalizedReply = normalizeBenchmarkText(replyText)
+	const normalizedSource = normalizeBenchmarkText(sourceText)
+	if (normalizedSource.length > 0 && normalizedReply.includes(normalizedSource)) return true
+	const { matched, required } = countMatchedTerms(replyText, sourceText)
+	return required > 0 && matched.length >= required
+}
+
+function collectMatchedConcepts(replyText: string, sourceTexts: string[]): string[] {
+	return sourceTexts.filter((sourceText) => replyMatchesConcept(replyText, sourceText))
+}
+
+function hasUnsafeRewrite(replyText: string): boolean {
+	const text = normalizeBenchmarkText(replyText)
+	return (
+		/\b(?:i|we)\s+(?:will|would)\s+(?:rewrite|replace)\b/u.test(text) ||
+		/\bfrom scratch\b/u.test(text) ||
+		/\bskip tests\b/u.test(text) ||
+		/\btests after the refactor\b/u.test(text) ||
+		/\bworry about .* later\b/u.test(text)
+	)
+}
+
+function hasScopeGuard(replyText: string): boolean {
+	const text = normalizeBenchmarkText(replyText)
+	return (
+		text.includes("keep this change bounded") ||
+		text.includes("smallest safe next step") ||
+		text.includes("only this bounded change") ||
+		text.includes("avoid changing") ||
+		text.includes("leave") && text.includes("alone") ||
+		text.includes("only widen scope after") ||
+		text.includes("preserve the") ||
+		text.includes("instead of starting with")
+	)
+}
+
+function buildLaneScore(lane: BalloonBenchmarkLaneScore["lane"], dimensions: BalloonBenchmarkScoreDimension[], scores: Array<{ score: number; rationale: string }>): BalloonBenchmarkLaneScore {
+	const dimensionScores: BalloonBenchmarkDimensionScore[] = dimensions.map((dimension, index) => ({
+		key: dimension.key,
+		label: dimension.label,
+		score: scores[index]?.score ?? 0,
+		rationale: scores[index]?.rationale ?? "No rationale recorded.",
+	}))
+	const total = dimensionScores.reduce((sum, score) => sum + score.score, 0)
+	const maxTotal = dimensions.length * 2
+	const topDimensions = dimensionScores.filter((score) => score.score === 2).map((score) => score.label.toLowerCase())
+	return {
+		lane,
+		total,
+		maxTotal,
+		dimensionScores,
+		summary:
+			topDimensions.length > 0
+				? `${lane} is strongest on ${topDimensions.slice(0, 3).join(", ")}.`
+				: `${lane} still leaves material recovery work on the table.`,
+	}
+}
+
+function scoreLaneReply(
+	lane: BalloonBenchmarkLaneScore["lane"],
+	replyText: string,
+	profile: StructuredProfile,
+	gaps: BalloonGap[],
+	hiddenRequirements: HiddenRequirement[],
+): BalloonBenchmarkLaneScore {
+	const dimensions = getBenchmarkScoreDimensions()
+	const unsafeRewrite = hasUnsafeRewrite(replyText)
+	const scopeGuard = hasScopeGuard(replyText)
+	const protectedConcepts = uniqueStrings([...profile.protectedAreas, ...profile.constraints])
+	const architectureConcepts = uniqueStrings([...profile.architectureDirection, ...profile.protectedAreas])
+	const verificationConcepts = uniqueStrings([
+		...profile.verificationObligations,
+		...hiddenRequirements.filter((requirement) => !requirement.coveredByResponse).map((requirement) => requirement.requirement),
+	])
+
+	const matchedProtectedConcepts = collectMatchedConcepts(replyText, protectedConcepts)
+	const matchedArchitectureConcepts = collectMatchedConcepts(replyText, architectureConcepts)
+	const matchedVerificationConcepts = collectMatchedConcepts(replyText, verificationConcepts)
+	const missingHiddenRequirements = hiddenRequirements.filter((requirement) => !requirement.coveredByResponse)
+	const matchedHiddenRequirements = collectMatchedConcepts(replyText, missingHiddenRequirements.map((requirement) => requirement.requirement))
+	const needsArchitectureRecovery = gaps.some((gap) => gap.type === "architecture_drift" || gap.type === "temporal_drift" || gap.type === "profile_contradiction")
+	const needsVerificationRecovery = gaps.some((gap) => gap.type === "constraint_omission") || verificationConcepts.length > 0
+
+	const constraintScore =
+		unsafeRewrite ? 0 : matchedProtectedConcepts.length > 0 || (scopeGuard && replyText.toLowerCase().includes("preserve")) ? 2 : 1
+	const architectureScore =
+		unsafeRewrite ? 0 : matchedArchitectureConcepts.length > 0 || scopeGuard ? 2 : 1
+	const verificationScore = unsafeRewrite
+		? 0
+		: verificationConcepts.length === 0
+			? 2
+			: matchedVerificationConcepts.length >= Math.max(1, verificationConcepts.length - 1)
+				? 2
+				: matchedVerificationConcepts.length > 0
+					? 1
+					: 0
+
+	const omissionTargets = [
+		needsArchitectureRecovery ? "architecture" : null,
+		needsVerificationRecovery ? "verification" : null,
+		missingHiddenRequirements.length > 0 ? "hidden-requirements" : null,
+	].filter((value): value is string => value !== null)
+	let recoveredTargets = 0
+	if (needsArchitectureRecovery && !unsafeRewrite && scopeGuard) recoveredTargets += 1
+	if (needsVerificationRecovery && verificationScore > 0) recoveredTargets += 1
+	if (missingHiddenRequirements.length > 0 && matchedHiddenRequirements.length > 0) recoveredTargets += 1
+	const omissionScore =
+		omissionTargets.length === 0 ? 2 : recoveredTargets >= omissionTargets.length ? 2 : recoveredTargets > 0 ? 1 : 0
+
+	const boundednessScore = unsafeRewrite ? 0 : replyText.toLowerCase().includes("smallest safe next step") || replyText.toLowerCase().includes("only widen scope after") ? 2 : scopeGuard ? 1 : 0
+	const clarityScore =
+		unsafeRewrite
+			? 0
+			: (replyText.length <= 700 && (scopeGuard || matchedVerificationConcepts.length > 0) && matchedArchitectureConcepts.length > 0)
+				? 2
+				: 1
+
+	return buildLaneScore(lane, dimensions, [
+		{
+			score: constraintScore,
+			rationale:
+				constraintScore === 2
+					? `Keeps explicit constraints visible (${matchedProtectedConcepts.slice(0, 2).join(" | ") || "scope-guard phrasing"}).`
+					: constraintScore === 1
+						? "Does not contradict the stored constraints, but leaves them less explicit."
+						: "Still pushes a broad rewrite or drops explicit constraint pressure.",
+		},
+		{
+			score: architectureScore,
+			rationale:
+				architectureScore === 2
+					? `Stays aligned to the requested architecture direction (${matchedArchitectureConcepts.slice(0, 2).join(" | ") || "bounded refactor avoidance"}).`
+					: architectureScore === 1
+						? "Avoids an obvious contradiction, but architecture direction is only weakly surfaced."
+						: "Still widens scope into the kind of rewrite Balloon was meant to stop.",
+		},
+		{
+			score: verificationScore,
+			rationale:
+				verificationScore === 2
+					? `Carries verification forward (${matchedVerificationConcepts.slice(0, 3).join(" | ") || "verification stays explicit"}).`
+					: verificationScore === 1
+						? "Keeps some verification pressure alive, but leaves parts of it implicit."
+						: "Still drops tests or other verification obligations that the profile said to keep visible.",
+		},
+		{
+			score: omissionScore,
+			rationale:
+				omissionScore === 2
+					? `Recovers the missing work Balloon flagged (${omissionTargets.join(" | ") || "no major omissions left"}).`
+					: omissionScore === 1
+						? `Recovers part of Balloon's missing-work signal, but not all of it (${omissionTargets.join(" | ")}).`
+						: "Mostly polishes wording without recovering the missing follow-on work or drift correction.",
+		},
+		{
+			score: boundednessScore,
+			rationale:
+				boundednessScore === 2
+					? "Defines the smallest safe next step and explicitly resists widening scope early."
+					: boundednessScore === 1
+						? "Signals bounded change, but stops short of a fully explicit next-step boundary."
+						: "Still leads with the bigger rewrite rather than the bounded recovery step.",
+		},
+		{
+			score: clarityScore,
+			rationale:
+				clarityScore === 2
+					? "Explains the correction in a way a maintainer could act on quickly."
+					: clarityScore === 1
+						? "Readable, but still a little generic or formulaic."
+						: "Confusing or misleading enough that it would slow a maintainer down.",
+		},
+	])
+}
+
+function buildBenchmarkScorecard(
+	store: BalloonStateStore,
+	sessionId: string,
+	options: BenchmarkLaneOptions,
+): BalloonBenchmarkScorecard | null {
+	const comparison = buildBenchmarkLaneComparison(store, sessionId, options)
+	if (!comparison) return null
+	const storedTurns = store.getTurns(sessionId, 5000)
+	if (storedTurns.length === 0) return null
+	const latestUserRequest = comparison.requestText || findLatestTurnContent(storedTurns, "user")
+	const latestResponse = comparison.latestResponse ?? findLatestTurnContent(storedTurns, "assistant")
+	if (!latestUserRequest || !latestResponse) return null
+	const profile = buildStructuredProfile(sessionId, storedTurns)
+	const hiddenRequirements = detectHiddenRequirements(latestUserRequest, latestResponse)
+	const gaps = auditLatestTurn(sessionId, profile, latestResponse, latestUserRequest)
+	const baseline = scoreLaneReply("baseline", comparison.baselineReply, profile, gaps, hiddenRequirements)
+	const deterministic = scoreLaneReply("deterministic", comparison.deterministicReply, profile, gaps, hiddenRequirements)
+	const assist = scoreLaneReply("assist", comparison.assistReply, profile, gaps, hiddenRequirements)
+	const staged = scoreLaneReply("staged", comparison.stagedReply, profile, gaps, hiddenRequirements)
+	const laneScores = [baseline, deterministic, assist, staged]
+	const bestTotal = Math.max(...laneScores.map((lane) => lane.total))
+	return {
+		sessionId,
+		dimensions: getBenchmarkScoreDimensions(),
+		baseline,
+		deterministic,
+		assist,
+		staged,
+		topLanes: laneScores.filter((lane) => lane.total === bestTotal).map((lane) => lane.lane),
+		deltas: {
+			deterministicVsBaseline: deterministic.total - baseline.total,
+			assistVsDeterministic: assist.total - deterministic.total,
+			stagedVsDeterministic: staged.total - deterministic.total,
+		},
+	}
+}
+
+function formatBenchmarkLaneScore(laneScore: BalloonBenchmarkLaneScore): string {
+	return [
+		`${laneScore.lane}: ${laneScore.total}/${laneScore.maxTotal}`,
+		...laneScore.dimensionScores.map((score) => `- ${score.label}: ${score.score}/2 — ${score.rationale}`),
+		`Summary: ${laneScore.summary}`,
+	].join("\n")
+}
+
+function formatBenchmarkScorecard(scorecard: BalloonBenchmarkScorecard): string {
+	return [
+		`Session: ${scorecard.sessionId}`,
+		`Top lane(s): ${scorecard.topLanes.join(", ")}`,
+		`Deterministic vs baseline: ${scorecard.deltas.deterministicVsBaseline >= 0 ? "+" : ""}${scorecard.deltas.deterministicVsBaseline}`,
+		`Assist vs deterministic: ${scorecard.deltas.assistVsDeterministic >= 0 ? "+" : ""}${scorecard.deltas.assistVsDeterministic}`,
+		`Staged vs deterministic: ${scorecard.deltas.stagedVsDeterministic >= 0 ? "+" : ""}${scorecard.deltas.stagedVsDeterministic}`,
+		"",
+		formatBenchmarkLaneScore(scorecard.baseline),
+		"",
+		formatBenchmarkLaneScore(scorecard.deterministic),
+		"",
+		formatBenchmarkLaneScore(scorecard.assist),
+		"",
+		formatBenchmarkLaneScore(scorecard.staged),
 	].join("\n")
 }
 
@@ -1013,6 +1357,41 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 			},
 		},
 		{
+			name: "balloon_score_benchmark_lanes",
+			title: "Score Benchmark Lanes",
+			description: "Scores baseline, deterministic, assist, and staged Balloon lanes on the standard six-dimension Balloon scorecard.",
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["sessionId"],
+				properties: {
+					sessionId: { type: "string", description: "Stable Balloon session id." },
+					userRequest: { type: "string", description: "Optional explicit user request to score against." },
+					latestResponse: { type: "string", description: "Optional explicit latest assistant response to audit before scoring." },
+					semanticAdapterPath: { type: "string", description: "Optional semantic adapter path for the assist lane." },
+					semanticTimeoutMs: { type: "number", description: "Optional semantic adapter timeout in milliseconds." },
+					semanticMaxNotes: { type: "number", description: "Optional cap on semantic notes returned." },
+					forceStageCount: { type: "number", description: "Optional override to force staged-lane depth. Defaults to 3 for short benchmark scenarios." },
+					stageThresholds: { type: "array", description: "Optional staged-lane thresholds.", items: { type: "number" } },
+				},
+			},
+			run: (args, context) => {
+				const sessionId = asString(args.sessionId)
+				if (!sessionId) return toolError("sessionId is required.")
+				const scorecard = buildBenchmarkScorecard(context.store, sessionId, {
+					userRequest: asString(args.userRequest) ?? undefined,
+					latestResponse: asString(args.latestResponse) ?? undefined,
+					semanticAdapterPath: args.semanticAdapterPath,
+					semanticTimeoutMs: args.semanticTimeoutMs,
+					semanticMaxNotes: args.semanticMaxNotes,
+					forceStageCount: args.forceStageCount ?? 3,
+					stageThresholds: args.stageThresholds,
+				})
+				if (!scorecard) return toolError(`Could not build the benchmark scorecard for session ${sessionId}.`)
+				return textResult(formatBenchmarkScorecard(scorecard), scorecard as unknown as JsonRecord)
+			},
+		},
+		{
 			name: "balloon_run_long_session_benchmark",
 			title: "Run Long-Session Benchmark",
 			description: "Runs checkpointed baseline, deterministic, assist, and staged Balloon comparisons across a longer stored session.",
@@ -1124,6 +1503,22 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 			run: (args) => {
 				const suite = buildSlopCodeStarterSuite(asString(args.datasetRoot) ?? undefined)
 				return textResult(formatSlopCodeStarterSuite(suite), suite as unknown as JsonRecord)
+			},
+		},
+		{
+			name: "balloon_plan_slopcode_starter_benchmark",
+			title: "Plan SlopCodeBench Starter Benchmark",
+			description: "Builds the repeatable starter-suite runbook Balloon should use before making dataset-backed anti-slop claims.",
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				properties: {
+					datasetRoot: { type: "string", description: "Optional local path to a SlopCodeBench snapshot or clone." },
+				},
+			},
+			run: (args) => {
+				const plan = buildSlopCodeStarterBenchmarkPlan(asString(args.datasetRoot) ?? undefined)
+				return textResult(formatSlopCodeStarterBenchmarkPlan(plan), plan as unknown as JsonRecord)
 			},
 		},
 		{
@@ -1260,6 +1655,13 @@ export function listBalloonResources(store: BalloonStateStore): ResourceDefiniti
 			description: "Verified first-pass SlopCodeBench problems recommended for Balloon anti-drift benchmarking.",
 			mimeType: "application/json",
 		},
+		{
+			uri: "balloon://benchmark/slopcode/starter-suite/runbook",
+			name: "slopcode-starter-runbook",
+			title: "Balloon SlopCodeBench Starter Runbook",
+			description: "Repeatable starter-suite benchmark plan with prompts, scoring focus, and communication boundaries.",
+			mimeType: "application/json",
+		},
 		...starterSuite.entries.map((entry) => ({
 			uri: `balloon://benchmark/slopcode/problems/${entry.problemName}`,
 			name: `slopcode-${entry.problemName}`,
@@ -1320,6 +1722,9 @@ export function listBalloonResources(store: BalloonStateStore): ResourceDefiniti
 export function readBalloonResource(store: BalloonStateStore, uri: string): ResourceContent | null {
 	if (uri === "balloon://benchmark/slopcode/starter-suite") {
 		return { uri, mimeType: "application/json", text: JSON.stringify(buildSlopCodeStarterSuite(), null, 2) }
+	}
+	if (uri === "balloon://benchmark/slopcode/starter-suite/runbook") {
+		return { uri, mimeType: "application/json", text: JSON.stringify(buildSlopCodeStarterBenchmarkPlan(), null, 2) }
 	}
 	const problemMatch = /^balloon:\/\/benchmark\/slopcode\/problems\/([^/]+)$/u.exec(uri)
 	if (problemMatch) {
