@@ -1,8 +1,29 @@
 # Balloon MCP Server
 
+<p align="center">
+  <img src="./docs/assets/balloon-mcp-icon.png" alt="Balloon MCP icon" width="160" />
+</p>
+
+<p align="center">
+  <a href="./docs/READINESS.md"><img alt="Status: Public Alpha" src="https://img.shields.io/badge/status-public%20alpha-0f766e" /></a>
+  <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1f2937" /></a>
+  <a href="./docs/HOST_COMPATIBILITY.md"><img alt="Hosts: VS Code first" src="https://img.shields.io/badge/hosts-VS%20Code%20first-2563eb" /></a>
+  <a href="./docs/LONG_SESSION_BENCHMARK.md"><img alt="Benchmarks: 4 lanes + long session" src="https://img.shields.io/badge/benchmarks-4%20lanes%20%2B%20long%20session-f59e0b" /></a>
+</p>
+
 Balloon MCP is an MCP server for monitoring context fidelity in long AI sessions.
 
 The server is designed around one central observation: long sessions do not only lose facts, they often lose the shape of the user's intent. Balloon turns that problem into a visible runtime surface with profiles, gap reports, retrieval anchors, corrective prompts, and replayable artifacts.
+
+<p align="center">
+  <img src="./docs/assets/balloon-mcp-stages.png" alt="Balloon MCP staged external prototype visual" width="560" />
+</p>
+
+At a glance:
+
+1. deterministic Balloon is the stable benchmark anchor
+2. assist Balloon adds optional semantic refinement
+3. staged Balloon adds early, mid, and deep external passes for longer-session discipline
 
 ## Why Balloon Exists
 
@@ -73,6 +94,13 @@ That staged lane is still honest about the MCP boundary:
 4. it gives us a fourth benchmark lane beyond baseline, deterministic, and assist
 
 See [docs/STAGED_EXTERNAL_BALLOON.md](./docs/STAGED_EXTERNAL_BALLOON.md).
+
+If you just want the shortest mental model:
+
+1. baseline drifts
+2. deterministic Balloon repairs the drift
+3. assist Balloon improves the wording and bounded-next-step quality
+4. staged Balloon adds re-check discipline before scope widens
 
 ## Why It Feels Different
 
@@ -195,6 +223,12 @@ If the demo feels good, the important part is not that Balloon produced more tex
 16. [Contributing](./CONTRIBUTING.md)
 17. [Security policy](./SECURITY.md)
 18. [Support](./SUPPORT.md)
+
+## Visual Assets
+
+1. app/listing icon: [docs/assets/balloon-mcp-icon.png](./docs/assets/balloon-mcp-icon.png)
+2. staged explainer image: [docs/assets/balloon-mcp-stages.png](./docs/assets/balloon-mcp-stages.png)
+3. simple mark: [docs/assets/balloon-mcp-mark.png](./docs/assets/balloon-mcp-mark.png)
 
 ## Good Fit
 
