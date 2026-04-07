@@ -1,0 +1,11 @@
+{
+  "tool": "balloon_prepare_slopcode_live_run_batch",
+  "arguments": {
+    "host": "vscode",
+    "problemNames": ["file_backup", "execution_server", "trajectory_api"],
+    "sessionIdPrefix": "REPLACE_WITH_YOUR_BATCH_PREFIX",
+    "datasetRoot": "REPLACE_WITH_YOUR_SLOPCODEBENCH_ROOT",
+    "provider": "REPLACE_WITH_PROVIDER",
+    "model": "REPLACE_WITH_MODEL"
+  }
+}

@@ -34,6 +34,7 @@ import type {
 	BalloonSlopCodeEvidenceSummary,
 	BalloonSlopCodeEvidenceCoverage,
 	BalloonSlopCodeEvidenceKind,
+	BalloonSlopCodeLiveRunBatchPacket,
 	BalloonSlopCodeLiveRunPacket,
 	BalloonSlopCodeProblemEvidenceSummary,
 	BalloonSlopCodeRunEvidence,
@@ -1608,6 +1609,96 @@ function formatSlopCodeLiveRunPacket(packet: BalloonSlopCodeLiveRunPacket): stri
 	].join("\n")
 }
 
+function buildSlopCodeLiveRunBatchPacket(options: {
+	host?: unknown
+	problemNames?: unknown
+	sessionIdPrefix?: unknown
+	datasetRoot?: unknown
+	provider?: unknown
+	model?: unknown
+}): BalloonSlopCodeLiveRunBatchPacket {
+	const host = parseHostKind(options.host)
+	const hostSurface = getHostSurface(host)
+	const requestedProblems = asStringArray(options.problemNames)
+	const starterProblems = getSlopCodeStarterSuiteEntries().map((entry) => entry.problemName)
+	const selectedProblems = requestedProblems.length > 0 ? requestedProblems.filter((problemName) => starterProblems.includes(problemName)) : starterProblems
+	const sessionIdPrefix = asString(options.sessionIdPrefix)
+	const datasetRoot = asString(options.datasetRoot)
+	const provider = asString(options.provider)
+	const model = asString(options.model)
+	const datasetStatus = getSlopCodeDatasetStatus(datasetRoot)
+	const warnings: string[] = []
+	if (requestedProblems.length > 0) {
+		const ignoredProblems = requestedProblems.filter((problemName) => !starterProblems.includes(problemName))
+		if (ignoredProblems.length > 0) warnings.push(`Ignored unknown starter-suite problem names: ${ignoredProblems.join(", ")}.`)
+	}
+	if (datasetStatus.verificationStatus !== "verified") {
+		warnings.push(`Dataset verification is ${datasetStatus.verificationStatus}, so this batch should be treated as provisional until the dataset root is fully verified.`)
+	}
+	if (hostSurface.readinessTier !== "recommended_first") {
+		warnings.push(`${hostSurface.displayName} is still ${hostSurface.status}, so repeat the batch carefully and keep the host validation notes explicit.`)
+	}
+	const packets = selectedProblems
+		.map((problemName) =>
+			buildSlopCodeLiveRunPacket({
+				problemName,
+				host,
+				sessionId: sessionIdPrefix ? `${sessionIdPrefix}-${problemName.replace(/_/g, "-")}` : undefined,
+				datasetRoot,
+				provider,
+				model,
+			}),
+		)
+		.filter((packet): packet is BalloonSlopCodeLiveRunPacket => packet !== null)
+
+	return {
+		host,
+		hostDisplayName: hostSurface.displayName,
+		sessionIdPrefix,
+		provider,
+		model,
+		datasetStatus,
+		totalProblems: packets.length,
+		selectedProblems: packets.map((packet) => packet.problemName),
+		warnings: uniqueStrings(warnings),
+		nextActions: [
+			`Run the batch in ${hostSurface.displayName} one problem at a time using the generated session ids.`,
+			"Record each rerun with balloon_record_slopcode_run_evidence immediately after scoring.",
+			"Export the starter-suite artifacts after the batch so the evidence coverage and pressure traces land in one bundle.",
+		],
+		packets,
+	}
+}
+
+function formatSlopCodeLiveRunBatchPacket(batch: BalloonSlopCodeLiveRunBatchPacket): string {
+	return [
+		`Host: ${batch.hostDisplayName} (${batch.host})`,
+		`Problems: ${batch.selectedProblems.join(", ") || "none"}`,
+		`Session prefix: ${batch.sessionIdPrefix ?? "none"}`,
+		`Provider: ${batch.provider ?? "unspecified"}`,
+		`Model: ${batch.model ?? "unspecified"}`,
+		"",
+		"Dataset status",
+		formatSlopCodeDatasetStatus(batch.datasetStatus),
+		"",
+		"Warnings",
+		...(batch.warnings.length > 0 ? batch.warnings.map((warning, index) => `${index + 1}. ${warning}`) : ["None recorded."]),
+		"",
+		"Next actions",
+		...batch.nextActions.map((action, index) => `${index + 1}. ${action}`),
+		"",
+		"Problem packets",
+		...batch.packets.flatMap((packet, index) => [
+			`${index + 1}. ${packet.problemName}`,
+			`Session id: ${packet.sessionId}`,
+			`Evidence target: ${packet.evidenceTarget.evidenceKind} via ${packet.evidenceTarget.transcriptSource}`,
+			`Checkpoints: ${packet.evidenceTarget.checkpoints.join(", ")}`,
+			`Evidence resource: ${packet.evidenceResourceUri}`,
+			`Warnings: ${packet.warnings.length > 0 ? packet.warnings.join(" | ") : "none"}`,
+		]),
+	].join("\n")
+}
+
 function buildSlopCodeLiveRunPlaybook(): JsonRecord {
 	const starterSuite = buildSlopCodeStarterSuite()
 	return {
@@ -1623,6 +1714,7 @@ function buildSlopCodeLiveRunPlaybook(): JsonRecord {
 		resourcePointers: [
 			"balloon://benchmark/slopcode/starter-suite",
 			"balloon://benchmark/slopcode/starter-suite/runbook",
+			"balloon://benchmark/slopcode/live-run-batch",
 			"balloon://benchmark/slopcode/evidence",
 		],
 		hosts: getHostSurfaceCatalog().map((surface) => ({
@@ -2410,6 +2502,7 @@ const BENCHMARK_SURFACE_TOOL_NAMES = [
 	"balloon_describe_slopcode_starter_suite",
 	"balloon_plan_slopcode_starter_benchmark",
 	"balloon_prepare_slopcode_live_run_packet",
+	"balloon_prepare_slopcode_live_run_batch",
 	"balloon_record_slopcode_run_evidence",
 	"balloon_summarize_slopcode_run_evidence",
 	"balloon_summarize_slopcode_starter_suite",
@@ -2420,6 +2513,7 @@ const BENCHMARK_SURFACE_RESOURCE_URIS = [
 	"balloon://benchmark/slopcode/starter-suite",
 	"balloon://benchmark/slopcode/starter-suite/runbook",
 	"balloon://benchmark/slopcode/live-run-playbook",
+	"balloon://benchmark/slopcode/live-run-batch",
 	"balloon://benchmark/slopcode/evidence",
 ] as const
 
@@ -4652,6 +4746,39 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 			},
 		},
 		{
+			name: "balloon_prepare_slopcode_live_run_batch",
+			title: "Prepare SlopCodeBench Live Run Batch",
+			description:
+				"Builds one batch packet for a whole live SCBench rerun pass so the host, session ids, scoring path, and evidence record plan stay aligned across multiple starter problems.",
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				properties: {
+					host: {
+						type: "string",
+						enum: ["vscode", "cline", "roo_code", "claude_desktop", "generic_json"],
+						description: "Target host for the live rerun batch. Defaults to vscode.",
+					},
+					problemNames: { type: "array", description: "Optional subset of starter-suite problems to include in the batch.", items: { type: "string" } },
+					sessionIdPrefix: { type: "string", description: "Optional prefix used to generate stable session ids for every selected problem." },
+					datasetRoot: { type: "string", description: "Optional local SlopCodeBench dataset root used for the batch." },
+					provider: { type: "string", description: "Optional provider you plan to use for the live rerun batch." },
+					model: { type: "string", description: "Optional model you plan to use for the live rerun batch." },
+				},
+			},
+			run: (args) => {
+				const batch = buildSlopCodeLiveRunBatchPacket({
+					host: args.host,
+					problemNames: args.problemNames,
+					sessionIdPrefix: args.sessionIdPrefix,
+					datasetRoot: args.datasetRoot,
+					provider: args.provider,
+					model: args.model,
+				})
+				return textResult(formatSlopCodeLiveRunBatchPacket(batch), batch as unknown as JsonRecord)
+			},
+		},
+		{
 			name: "balloon_record_slopcode_run_evidence",
 			title: "Record SlopCodeBench Run Evidence",
 			description:
@@ -4943,6 +5070,13 @@ export function listBalloonResources(store: BalloonStateStore): ResourceDefiniti
 			mimeType: "application/json",
 		},
 		{
+			uri: "balloon://benchmark/slopcode/live-run-batch",
+			name: "slopcode-live-run-batch",
+			title: "Balloon SlopCodeBench Live Run Batch",
+			description: "Default batch packet for running the full starter-suite live rerun pass in one host.",
+			mimeType: "application/json",
+		},
+		{
 			uri: "balloon://benchmark/slopcode/evidence",
 			name: "slopcode-evidence",
 			title: "Balloon SlopCodeBench Evidence",
@@ -5052,6 +5186,9 @@ export function readBalloonResource(store: BalloonStateStore, uri: string): Reso
 	}
 	if (uri === "balloon://benchmark/slopcode/live-run-playbook") {
 		return { uri, mimeType: "application/json", text: JSON.stringify(buildSlopCodeLiveRunPlaybook(), null, 2) }
+	}
+	if (uri === "balloon://benchmark/slopcode/live-run-batch") {
+		return { uri, mimeType: "application/json", text: JSON.stringify(buildSlopCodeLiveRunBatchPacket({}), null, 2) }
 	}
 	if (uri === "balloon://benchmark/slopcode/evidence") {
 		return { uri, mimeType: "application/json", text: JSON.stringify(buildSlopCodeEvidenceSummary(store), null, 2) }

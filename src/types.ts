@@ -445,6 +445,20 @@ export interface BalloonSlopCodeLiveRunPacket {
 	steps: BalloonSlopCodeLiveRunStep[]
 }
 
+export interface BalloonSlopCodeLiveRunBatchPacket {
+	host: BalloonHostKind
+	hostDisplayName: string
+	sessionIdPrefix: string | null
+	provider: string | null
+	model: string | null
+	datasetStatus: SlopCodeDatasetStatus
+	totalProblems: number
+	selectedProblems: string[]
+	warnings: string[]
+	nextActions: string[]
+	packets: BalloonSlopCodeLiveRunPacket[]
+}
+
 export type BalloonSlopCodeEvidenceKind = "live_llm" | "manual_replay" | "fixture" | "synthetic_demo"
 
 export type BalloonSlopCodeTranscriptSource = "live_host_session" | "pasted_turns" | "fixture_turns" | "generated_demo"

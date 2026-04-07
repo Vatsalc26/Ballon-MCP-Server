@@ -36,16 +36,18 @@ Use:
 4. `balloon_score_benchmark_lanes`
 5. `balloon_score_long_session_benchmark`
 6. `balloon_prepare_slopcode_live_run_packet`
-7. `balloon_record_slopcode_run_evidence`
-8. `balloon_summarize_slopcode_run_evidence`
-9. `balloon_summarize_slopcode_starter_suite`
-10. `balloon_export_slopcode_starter_artifacts`
-11. `balloon://benchmark/slopcode/starter-suite`
-12. `balloon://benchmark/slopcode/starter-suite/runbook`
-13. `balloon://benchmark/slopcode/live-run-playbook`
-14. `balloon://benchmark/slopcode/evidence`
-15. `balloon://benchmark/slopcode/evidence/{problemName}`
-16. `balloon://benchmark/slopcode/problems/{problemName}`
+7. `balloon_prepare_slopcode_live_run_batch`
+8. `balloon_record_slopcode_run_evidence`
+9. `balloon_summarize_slopcode_run_evidence`
+10. `balloon_summarize_slopcode_starter_suite`
+11. `balloon_export_slopcode_starter_artifacts`
+12. `balloon://benchmark/slopcode/starter-suite`
+13. `balloon://benchmark/slopcode/starter-suite/runbook`
+14. `balloon://benchmark/slopcode/live-run-playbook`
+15. `balloon://benchmark/slopcode/live-run-batch`
+16. `balloon://benchmark/slopcode/evidence`
+17. `balloon://benchmark/slopcode/evidence/{problemName}`
+18. `balloon://benchmark/slopcode/problems/{problemName}`
 
 ## Fast Starter Workflow
 
@@ -55,14 +57,15 @@ Use:
 4. build the runbook with `balloon_plan_slopcode_starter_benchmark`
 5. inspect one problem with `balloon_prepare_slopcode_problem`
 6. generate the host/problem live packet with `balloon_prepare_slopcode_live_run_packet`
-7. run the checkpoint sequence in your host
-8. compare lanes with `balloon_compare_benchmark_lanes`
-9. score them with `balloon_score_benchmark_lanes`
-10. if you stretch the same session across multiple checkpoints, score the whole checkpoint batch with `balloon_score_long_session_benchmark`
-11. for SCBench starter sequences, treat those checkpoint numbers as assistant-turn ordinals and set `checkpointMode: assistant_checkpoint`
-12. record whether the run was live, replayed, fixture-based, or synthetic with `balloon_record_slopcode_run_evidence`
-13. after several problem sessions exist, roll them up with `balloon_summarize_slopcode_run_evidence` and `balloon_summarize_slopcode_starter_suite`
-14. export the suite bundle with `balloon_export_slopcode_starter_artifacts`
+7. if you want the whole pass at once, generate the batch packet with `balloon_prepare_slopcode_live_run_batch`
+8. run the checkpoint sequence in your host
+9. compare lanes with `balloon_compare_benchmark_lanes`
+10. score them with `balloon_score_benchmark_lanes`
+11. if you stretch the same session across multiple checkpoints, score the whole checkpoint batch with `balloon_score_long_session_benchmark`
+12. for SCBench starter sequences, treat those checkpoint numbers as assistant-turn ordinals and set `checkpointMode: assistant_checkpoint`
+13. record whether the run was live, replayed, fixture-based, or synthetic with `balloon_record_slopcode_run_evidence`
+14. after several problem sessions exist, roll them up with `balloon_summarize_slopcode_run_evidence` and `balloon_summarize_slopcode_starter_suite`
+15. export the suite bundle with `balloon_export_slopcode_starter_artifacts`
 
 ## Recommended First Order
 

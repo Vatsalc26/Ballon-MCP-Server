@@ -39,6 +39,7 @@ type SmokeResult = {
 	slopcodeStarterArtifactExportWorked: boolean
 	slopcodeProblemPrepWorked: boolean
 	slopcodeLiveRunPacketWorked: boolean
+	slopcodeLiveRunBatchWorked: boolean
 	slopcodeEvidenceRecordWorked: boolean
 	slopcodeEvidenceSummaryWorked: boolean
 	reviewDriftFallbackWorked: boolean
@@ -269,6 +270,7 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			hasTool(toolsList, "balloon_export_slopcode_starter_artifacts") &&
 			hasTool(toolsList, "balloon_prepare_slopcode_problem") &&
 			hasTool(toolsList, "balloon_prepare_slopcode_live_run_packet") &&
+			hasTool(toolsList, "balloon_prepare_slopcode_live_run_batch") &&
 			hasTool(toolsList, "balloon_record_slopcode_run_evidence") &&
 			hasTool(toolsList, "balloon_summarize_slopcode_run_evidence") &&
 			hasTool(toolsList, "balloon_review_session_drift")
@@ -984,6 +986,36 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 				false)
 		details.push(`slopcodeLiveRunPacketWorked=${slopcodeLiveRunPacketWorked ? "yes" : "no"}`)
 
+		const slopcodeLiveRunBatch = (await client.request("tools/call", {
+			name: "balloon_prepare_slopcode_live_run_batch",
+			arguments: {
+				host: "cline",
+				problemNames: ["file_backup", "execution_server"],
+				sessionIdPrefix: "scbench-cline-live",
+				provider: "openai",
+				model: "gpt-5.4",
+			},
+		})) as {
+			structuredContent?: {
+				host?: string
+				totalProblems?: number
+				selectedProblems?: string[]
+				packets?: Array<{ problemName?: string; sessionId?: string; evidenceTarget?: { evidenceKind?: string } }>
+			}
+		}
+		const slopcodeLiveRunBatchWorked =
+			slopcodeLiveRunBatch.structuredContent?.host === "cline" &&
+			slopcodeLiveRunBatch.structuredContent?.totalProblems === 2 &&
+			(slopcodeLiveRunBatch.structuredContent?.selectedProblems?.includes("file_backup") ?? false) &&
+			(slopcodeLiveRunBatch.structuredContent?.packets?.some(
+				(packet) =>
+					packet.problemName === "execution_server" &&
+					packet.sessionId === "scbench-cline-live-execution-server" &&
+					packet.evidenceTarget?.evidenceKind === "live_llm",
+			) ??
+				false)
+		details.push(`slopcodeLiveRunBatchWorked=${slopcodeLiveRunBatchWorked ? "yes" : "no"}`)
+
 		const slopcodeEvidenceSummary = (await client.request("tools/call", {
 			name: "balloon_summarize_slopcode_run_evidence",
 			arguments: {
@@ -1106,6 +1138,9 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 		const slopcodeLiveRunPlaybookUri = Array.isArray(resources.resources)
 			? resources.resources.find((resource) => resource?.uri === "balloon://benchmark/slopcode/live-run-playbook")?.uri
 			: undefined
+		const slopcodeLiveRunBatchUri = Array.isArray(resources.resources)
+			? resources.resources.find((resource) => resource?.uri === "balloon://benchmark/slopcode/live-run-batch")?.uri
+			: undefined
 		const slopcodeEvidenceUri = Array.isArray(resources.resources)
 			? resources.resources.find((resource) => resource?.uri === "balloon://benchmark/slopcode/evidence")?.uri
 			: undefined
@@ -1148,6 +1183,9 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 		const slopcodeLiveRunPlaybookResource = slopcodeLiveRunPlaybookUri
 			? ((await client.request("resources/read", { uri: slopcodeLiveRunPlaybookUri })) as { contents?: Array<{ text?: string }> })
 			: null
+		const slopcodeLiveRunBatchResource = slopcodeLiveRunBatchUri
+			? ((await client.request("resources/read", { uri: slopcodeLiveRunBatchUri })) as { contents?: Array<{ text?: string }> })
+			: null
 		const slopcodeEvidenceResource = slopcodeEvidenceUri
 			? ((await client.request("resources/read", { uri: slopcodeEvidenceUri })) as { contents?: Array<{ text?: string }> })
 			: null
@@ -1166,6 +1204,8 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			Boolean(starterRunbookResource?.contents?.[0]?.text?.includes("\"executionOrder\"")) &&
 			Boolean(slopcodeLiveRunPlaybookResource?.contents?.[0]?.text?.includes("\"Balloon SlopCodeBench Live Run Playbook\"")) &&
 			Boolean(slopcodeLiveRunPlaybookResource?.contents?.[0]?.text?.includes("\"balloon_prepare_slopcode_live_run_packet\"")) &&
+			Boolean(slopcodeLiveRunBatchResource?.contents?.[0]?.text?.includes("\"totalProblems\": 3")) &&
+			Boolean(slopcodeLiveRunBatchResource?.contents?.[0]?.text?.includes("\"file_backup\"")) &&
 			Boolean(slopcodeEvidenceResource?.contents?.[0]?.text?.includes("\"suiteName\": \"Balloon SlopCodeBench Evidence\"")) &&
 			Boolean(slopcodeEvidenceResource?.contents?.[0]?.text?.includes("\"coverage\": \"non_live_only\""))
 		details.push(`resourceReadWorked=${resourceReadWorked ? "yes" : "no"}`)
@@ -1197,6 +1237,7 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			slopcodeStarterArtifactExportWorked,
 			slopcodeProblemPrepWorked,
 			slopcodeLiveRunPacketWorked,
+			slopcodeLiveRunBatchWorked,
 			slopcodeEvidenceRecordWorked,
 			slopcodeEvidenceSummaryWorked,
 			reviewDriftFallbackWorked,
@@ -1241,6 +1282,7 @@ export function formatBalloonMcpSmoke(result: SmokeResult): string {
 		`SCBench starter artifact export: ${result.slopcodeStarterArtifactExportWorked ? "PASS" : "FAIL"}`,
 		`SCBench problem preparation: ${result.slopcodeProblemPrepWorked ? "PASS" : "FAIL"}`,
 		`SCBench live-run packet: ${result.slopcodeLiveRunPacketWorked ? "PASS" : "FAIL"}`,
+		`SCBench live-run batch: ${result.slopcodeLiveRunBatchWorked ? "PASS" : "FAIL"}`,
 		`SCBench evidence record: ${result.slopcodeEvidenceRecordWorked ? "PASS" : "FAIL"}`,
 		`SCBench evidence summary: ${result.slopcodeEvidenceSummaryWorked ? "PASS" : "FAIL"}`,
 		`Review drift fallback: ${result.reviewDriftFallbackWorked ? "PASS" : "FAIL"}`,
@@ -1283,6 +1325,7 @@ async function main(): Promise<void> {
 			result.slopcodeStarterArtifactExportWorked &&
 			result.slopcodeProblemPrepWorked &&
 			result.slopcodeLiveRunPacketWorked &&
+			result.slopcodeLiveRunBatchWorked &&
 			result.slopcodeEvidenceRecordWorked &&
 			result.slopcodeEvidenceSummaryWorked &&
 			result.reviewDriftFallbackWorked &&

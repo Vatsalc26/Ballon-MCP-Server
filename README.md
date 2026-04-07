@@ -167,13 +167,14 @@ Tools:
 23. `balloon_plan_slopcode_starter_benchmark`
 24. `balloon_prepare_slopcode_problem`
 25. `balloon_prepare_slopcode_live_run_packet`
-26. `balloon_record_slopcode_run_evidence`
-27. `balloon_summarize_slopcode_run_evidence`
-28. `balloon_summarize_slopcode_starter_suite`
-29. `balloon_export_slopcode_starter_artifacts`
-30. `balloon_review_session_drift`
-31. `balloon_update_memory_ledger`
-32. `balloon_explain_gap_report`
+26. `balloon_prepare_slopcode_live_run_batch`
+27. `balloon_record_slopcode_run_evidence`
+28. `balloon_summarize_slopcode_run_evidence`
+29. `balloon_summarize_slopcode_starter_suite`
+30. `balloon_export_slopcode_starter_artifacts`
+31. `balloon_review_session_drift`
+32. `balloon_update_memory_ledger`
+33. `balloon_explain_gap_report`
 
 Prompts:
 
@@ -197,9 +198,10 @@ Resources:
 13. `balloon://benchmark/slopcode/starter-suite`
 14. `balloon://benchmark/slopcode/starter-suite/runbook`
 15. `balloon://benchmark/slopcode/live-run-playbook`
-16. `balloon://benchmark/slopcode/evidence`
-17. `balloon://benchmark/slopcode/evidence/{problemName}`
-18. `balloon://benchmark/slopcode/problems/{problemName}`
+16. `balloon://benchmark/slopcode/live-run-batch`
+17. `balloon://benchmark/slopcode/evidence`
+18. `balloon://benchmark/slopcode/evidence/{problemName}`
+19. `balloon://benchmark/slopcode/problems/{problemName}`
 
 ## Getting Started
 
@@ -236,6 +238,8 @@ If you want Balloon to generate or sanity-check a host config packet, use `ballo
 If you want the first real SlopCodeBench starter-suite workflow, use `balloon_describe_slopcode_starter_suite` and `balloon_prepare_slopcode_problem`.
 
 If you want Balloon to hand you the full true-live rerun packet for a host/problem pair, use `balloon_prepare_slopcode_live_run_packet`.
+
+If you want the whole starter-suite rerun pass prepared in one shot, use `balloon_prepare_slopcode_live_run_batch`.
 
 If you want repo-backed SCBench summary bundles, use `balloon_export_slopcode_starter_artifacts`. Those exports now include both pressure traces and live-vs-replay evidence coverage.
 
