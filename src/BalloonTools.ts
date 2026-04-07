@@ -34,6 +34,7 @@ import type {
 	BalloonSlopCodeEvidenceSummary,
 	BalloonSlopCodeEvidenceCoverage,
 	BalloonSlopCodeEvidenceKind,
+	BalloonSlopCodeLiveRunPacket,
 	BalloonSlopCodeProblemEvidenceSummary,
 	BalloonSlopCodeRunEvidence,
 	BalloonSlopCodeTranscriptSource,
@@ -1406,6 +1407,246 @@ function formatSlopCodeEvidenceSummary(summary: BalloonSlopCodeEvidenceSummary):
 	].join("\n")
 }
 
+function buildSlopCodeLiveRunPacket(options: {
+	problemName?: unknown
+	host?: unknown
+	sessionId?: unknown
+	datasetRoot?: unknown
+	provider?: unknown
+	model?: unknown
+}): BalloonSlopCodeLiveRunPacket | null {
+	const problemName = asString(options.problemName)
+	if (!problemName) return null
+	const preparation = buildSlopCodeProblemPreparation(problemName, asString(options.datasetRoot) ?? undefined)
+	if (!preparation) return null
+	const host = parseHostKind(options.host)
+	const hostSurface = getHostSurface(host)
+	const sessionId = asString(options.sessionId) ?? preparation.recommendedSessionId
+	const provider = asString(options.provider)
+	const model = asString(options.model)
+	const datasetRoot = asString(options.datasetRoot)
+	const datasetStatus = preparation.datasetStatus
+	const warnings: string[] = []
+	if (datasetStatus.verificationStatus !== "verified") {
+		warnings.push(`Dataset verification is ${datasetStatus.verificationStatus}, so a live run should not be presented as fully verified benchmark evidence yet.`)
+	}
+	if (hostSurface.readinessTier !== "recommended_first") {
+		warnings.push(`${hostSurface.displayName} is currently ${hostSurface.status}, so repeat the live rerun carefully and keep the host evidence notes explicit.`)
+	}
+
+	const recordEvidenceArgs: Record<string, unknown> = {
+		problemName,
+		sessionId,
+		evidenceKind: "live_llm",
+		transcriptSource: "live_host_session",
+		host,
+		checkpointMode: preparation.recommendedCheckpointMode,
+		checkpoints: preparation.entry.recommendedCheckpointBatch,
+	}
+	if (provider) recordEvidenceArgs.provider = provider
+	if (model) recordEvidenceArgs.model = model
+	if (datasetRoot) recordEvidenceArgs.datasetRoot = datasetRoot
+
+	return {
+		problemName,
+		host,
+		hostDisplayName: hostSurface.displayName,
+		sessionId,
+		provider,
+		model,
+		datasetStatus,
+		problemPreparation: preparation,
+		evidenceTarget: {
+			evidenceKind: "live_llm",
+			transcriptSource: "live_host_session",
+			host,
+			provider,
+			model,
+			checkpointMode: preparation.recommendedCheckpointMode,
+			checkpoints: [...preparation.entry.recommendedCheckpointBatch],
+		},
+		validationResourceUri: `balloon://hosts/${host}/validation-suite`,
+		evidenceResourceUri: `balloon://benchmark/slopcode/evidence/${problemName}`,
+		docsPath: hostSurface.docsPath,
+		warnings,
+		claimBoundary: [
+			"Only call the run live_llm if it came from a real host-connected model session.",
+			"Replaying pasted turns is useful, but it belongs under manual_replay instead of live_llm.",
+			"Do not claim a full benchmark win until the dataset is verified and multiple live reruns exist.",
+		],
+		steps: [
+			{
+				stepId: "dataset_verify",
+				title: "Verify dataset snapshot",
+				goal: "Check that the local SlopCodeBench snapshot is present and still looks like the expected upstream dataset.",
+				toolName: "balloon_describe_slopcode_starter_suite",
+				toolArgs: datasetRoot ? { datasetRoot } : {},
+				notes: [
+					"Use the CLI dataset verifiers before making stronger benchmark claims.",
+					"Treat zip-style snapshots without commit pinning as weaker evidence than a verified clone.",
+				],
+			},
+			{
+				stepId: "host_validate",
+				title: "Sanity-check the MCP host",
+				goal: "Make sure the chosen host is healthy before you trust the live rerun.",
+				toolName: "balloon_prepare_host_validation_suite",
+				toolArgs: {
+					host,
+					sessionId,
+					userRequest: preparation.suggestedCompareBenchmarkPrompt,
+				},
+				notes: [
+					`Read ${hostSurface.docsPath} and use ${hostSurface.recommendedFirstTools.join(", ")} before prompt-heavy flows.`,
+					"Prefer a fresh chat after restarting the host if anything feels stale.",
+				],
+			},
+			{
+				stepId: "problem_prepare",
+				title: "Prepare the problem packet",
+				goal: "Load the checkpoint files, recommended session id, and scoring focus for the target SCBench problem.",
+				toolName: "balloon_prepare_slopcode_problem",
+				toolArgs: datasetRoot ? { problemName, datasetRoot } : { problemName },
+				notes: [
+					"Keep the recommended session id stable across the live run, scoring step, and evidence record.",
+				],
+			},
+			{
+				stepId: "live_run",
+				title: "Run the live host session",
+				goal: "Execute the problem in the real host/model session using the checkpoint sequence instead of a replay.",
+				toolName: "balloon_compare_benchmark_lanes",
+				toolArgs: {
+					sessionId,
+					userRequest: "<paste the latest live checkpoint request here>",
+					semanticAdapterPath: "./examples/semantic_cara_adapter.example.mjs",
+					forceStageCount: preparation.entry.recommendedForceStageCount,
+					stageThresholds: preparation.entry.recommendedLongSessionThresholds,
+				},
+				notes: [
+					"Paste the real live checkpoint turns into the same session instead of fabricating them afterward.",
+					"Keep the change bounded to the benchmark checkpoint you are actually running.",
+				],
+			},
+			{
+				stepId: "score",
+				title: "Score the checkpoint batch",
+				goal: "Run the standard Balloon scoring path across the opening, middle, and late checkpoints.",
+				toolName: "balloon_score_long_session_benchmark",
+				toolArgs: {
+					sessionId,
+					checkpoints: preparation.entry.recommendedCheckpointBatch,
+					checkpointMode: preparation.recommendedCheckpointMode,
+					semanticAdapterPath: "./examples/semantic_cara_adapter.example.mjs",
+					forceStageCount: preparation.entry.recommendedForceStageCount,
+					stageThresholds: preparation.entry.recommendedLongSessionThresholds,
+				},
+				notes: [
+					"For SCBench starter runs, the checkpoint numbers are assistant-turn ordinals.",
+				],
+			},
+			{
+				stepId: "record_evidence",
+				title: "Record live evidence",
+				goal: "Mark the rerun as truly live with host/model metadata instead of leaving it as an implicit chat memory.",
+				toolName: "balloon_record_slopcode_run_evidence",
+				toolArgs: recordEvidenceArgs,
+				notes: [
+					"If the session was not truly live, change evidenceKind before recording it.",
+				],
+			},
+			{
+				stepId: "export_artifacts",
+				title: "Export the benchmark bundle",
+				goal: "Write JSON and Markdown artifacts that carry score, pressure, and evidence coverage together.",
+				toolName: "balloon_export_slopcode_starter_artifacts",
+				toolArgs: {
+					problemNames: [problemName],
+					semanticAdapterPath: "./examples/semantic_cara_adapter.example.mjs",
+					forceStageCount: preparation.entry.recommendedForceStageCount,
+					stageThresholds: preparation.entry.recommendedLongSessionThresholds,
+				},
+				notes: [
+					"The export bundle should now show whether the rerun is truly live or still replay/demo only.",
+				],
+			},
+		],
+	}
+}
+
+function formatSlopCodeLiveRunPacket(packet: BalloonSlopCodeLiveRunPacket): string {
+	return [
+		`Problem: ${packet.problemName}`,
+		`Host: ${packet.hostDisplayName} (${packet.host})`,
+		`Session id: ${packet.sessionId}`,
+		`Provider: ${packet.provider ?? "unspecified"}`,
+		`Model: ${packet.model ?? "unspecified"}`,
+		"",
+		"Dataset status",
+		formatSlopCodeDatasetStatus(packet.datasetStatus),
+		"",
+		`Evidence target: ${packet.evidenceTarget.evidenceKind} via ${packet.evidenceTarget.transcriptSource}`,
+		`Checkpoint mode: ${packet.evidenceTarget.checkpointMode}`,
+		`Checkpoints: ${packet.evidenceTarget.checkpoints.join(", ")}`,
+		`Host validation resource: ${packet.validationResourceUri}`,
+		`Evidence resource: ${packet.evidenceResourceUri}`,
+		`Host docs: ${packet.docsPath}`,
+		"",
+		"Warnings",
+		...(packet.warnings.length > 0 ? packet.warnings.map((warning, index) => `${index + 1}. ${warning}`) : ["None recorded."]),
+		"",
+		"Claim boundary",
+		...packet.claimBoundary.map((item, index) => `${index + 1}. ${item}`),
+		"",
+		"Steps",
+		...packet.steps.flatMap((step, index) => [
+			`${index + 1}. ${step.title}`,
+			`Goal: ${step.goal}`,
+			`Tool: ${step.toolName ?? "manual / CLI step"}`,
+			...(step.notes.length > 0 ? step.notes.map((note, noteIndex) => `Note ${noteIndex + 1}: ${note}`) : []),
+		]),
+	].join("\n")
+}
+
+function buildSlopCodeLiveRunPlaybook(): JsonRecord {
+	const starterSuite = buildSlopCodeStarterSuite()
+	return {
+		title: "Balloon SlopCodeBench Live Run Playbook",
+		summary: "Use this playbook when you want true live SCBench evidence instead of replay-only or synthetic benchmark traces.",
+		requiredTools: [
+			"balloon_prepare_slopcode_live_run_packet",
+			"balloon_prepare_slopcode_problem",
+			"balloon_score_long_session_benchmark",
+			"balloon_record_slopcode_run_evidence",
+			"balloon_export_slopcode_starter_artifacts",
+		],
+		resourcePointers: [
+			"balloon://benchmark/slopcode/starter-suite",
+			"balloon://benchmark/slopcode/starter-suite/runbook",
+			"balloon://benchmark/slopcode/evidence",
+		],
+		hosts: getHostSurfaceCatalog().map((surface) => ({
+			host: surface.host,
+			displayName: surface.displayName,
+			readinessTier: surface.readinessTier,
+			status: surface.status,
+			docsPath: surface.docsPath,
+		})),
+		problems: starterSuite.entries.map((entry) => ({
+			problemName: entry.problemName,
+			checkpoints: entry.recommendedCheckpointBatch,
+			checkpointCount: entry.checkpointCount,
+			forceStageCount: entry.recommendedForceStageCount,
+			longSessionThresholds: entry.recommendedLongSessionThresholds,
+		})),
+		claimBoundary: [
+			"Do not call a run live_llm unless it came from a real host-connected model session.",
+			"Use manual_replay, fixture, or synthetic_demo when the turns were reconstructed or generated.",
+			"Keep the exported bundle and evidence ledger aligned before making public benchmark claims.",
+		],
+	} satisfies JsonRecord
+}
+
 function formatProblemEvidenceSummaryBlock(summary: BalloonSlopCodeProblemEvidenceSummary): string[] {
 	return [
 		`Evidence coverage: ${summary.coverage}`,
@@ -2168,6 +2409,7 @@ const BENCHMARK_SURFACE_TOOL_NAMES = [
 	"balloon_score_long_session_benchmark",
 	"balloon_describe_slopcode_starter_suite",
 	"balloon_plan_slopcode_starter_benchmark",
+	"balloon_prepare_slopcode_live_run_packet",
 	"balloon_record_slopcode_run_evidence",
 	"balloon_summarize_slopcode_run_evidence",
 	"balloon_summarize_slopcode_starter_suite",
@@ -2177,6 +2419,7 @@ const BENCHMARK_SURFACE_TOOL_NAMES = [
 const BENCHMARK_SURFACE_RESOURCE_URIS = [
 	"balloon://benchmark/slopcode/starter-suite",
 	"balloon://benchmark/slopcode/starter-suite/runbook",
+	"balloon://benchmark/slopcode/live-run-playbook",
 	"balloon://benchmark/slopcode/evidence",
 ] as const
 
@@ -4370,6 +4613,45 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 			},
 		},
 		{
+			name: "balloon_prepare_slopcode_live_run_packet",
+			title: "Prepare SlopCodeBench Live Run Packet",
+			description:
+				"Builds the full live-rerun packet for one starter-suite SCBench problem, including host guidance, scoring steps, and the exact live evidence record Balloon expects afterward.",
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["problemName"],
+				properties: {
+					problemName: { type: "string", description: "Starter-suite problem name such as file_backup, execution_server, or trajectory_api." },
+					host: {
+						type: "string",
+						enum: ["vscode", "cline", "roo_code", "claude_desktop", "generic_json"],
+						description: "Target host for the live rerun. Defaults to vscode.",
+					},
+					sessionId: { type: "string", description: "Optional stable session id for the live rerun. Defaults to the recommended problem session id." },
+					datasetRoot: { type: "string", description: "Optional local SlopCodeBench dataset root used for the run." },
+					provider: { type: "string", description: "Optional provider you plan to use for the live rerun." },
+					model: { type: "string", description: "Optional model you plan to use for the live rerun." },
+				},
+			},
+			run: (args) => {
+				const packet = buildSlopCodeLiveRunPacket({
+					problemName: args.problemName,
+					host: args.host,
+					sessionId: args.sessionId,
+					datasetRoot: args.datasetRoot,
+					provider: args.provider,
+					model: args.model,
+				})
+				if (!packet) {
+					return toolError(
+						`Unknown SlopCodeBench starter-suite problem: ${asString(args.problemName) ?? "unknown"}. Use balloon_describe_slopcode_starter_suite first.`,
+					)
+				}
+				return textResult(formatSlopCodeLiveRunPacket(packet), packet as unknown as JsonRecord)
+			},
+		},
+		{
 			name: "balloon_record_slopcode_run_evidence",
 			title: "Record SlopCodeBench Run Evidence",
 			description:
@@ -4654,6 +4936,13 @@ export function listBalloonResources(store: BalloonStateStore): ResourceDefiniti
 			mimeType: "application/json",
 		},
 		{
+			uri: "balloon://benchmark/slopcode/live-run-playbook",
+			name: "slopcode-live-run-playbook",
+			title: "Balloon SlopCodeBench Live Run Playbook",
+			description: "Generic host/problem guidance for collecting true live SCBench evidence instead of replay-only traces.",
+			mimeType: "application/json",
+		},
+		{
 			uri: "balloon://benchmark/slopcode/evidence",
 			name: "slopcode-evidence",
 			title: "Balloon SlopCodeBench Evidence",
@@ -4760,6 +5049,9 @@ export function readBalloonResource(store: BalloonStateStore, uri: string): Reso
 	}
 	if (uri === "balloon://benchmark/slopcode/starter-suite/runbook") {
 		return { uri, mimeType: "application/json", text: JSON.stringify(buildSlopCodeStarterBenchmarkPlan(), null, 2) }
+	}
+	if (uri === "balloon://benchmark/slopcode/live-run-playbook") {
+		return { uri, mimeType: "application/json", text: JSON.stringify(buildSlopCodeLiveRunPlaybook(), null, 2) }
 	}
 	if (uri === "balloon://benchmark/slopcode/evidence") {
 		return { uri, mimeType: "application/json", text: JSON.stringify(buildSlopCodeEvidenceSummary(store), null, 2) }

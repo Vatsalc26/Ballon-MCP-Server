@@ -38,6 +38,7 @@ type SmokeResult = {
 	slopcodeStarterSummaryWorked: boolean
 	slopcodeStarterArtifactExportWorked: boolean
 	slopcodeProblemPrepWorked: boolean
+	slopcodeLiveRunPacketWorked: boolean
 	slopcodeEvidenceRecordWorked: boolean
 	slopcodeEvidenceSummaryWorked: boolean
 	reviewDriftFallbackWorked: boolean
@@ -267,6 +268,7 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			hasTool(toolsList, "balloon_summarize_slopcode_starter_suite") &&
 			hasTool(toolsList, "balloon_export_slopcode_starter_artifacts") &&
 			hasTool(toolsList, "balloon_prepare_slopcode_problem") &&
+			hasTool(toolsList, "balloon_prepare_slopcode_live_run_packet") &&
 			hasTool(toolsList, "balloon_record_slopcode_run_evidence") &&
 			hasTool(toolsList, "balloon_summarize_slopcode_run_evidence") &&
 			hasTool(toolsList, "balloon_review_session_drift")
@@ -951,6 +953,37 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			(problemPreparation.structuredContent?.checkpointFiles?.length ?? 0) >= 4
 		details.push(`slopcodeProblemPrepWorked=${slopcodeProblemPrepWorked ? "yes" : "no"}`)
 
+		const slopcodeLiveRunPacket = (await client.request("tools/call", {
+			name: "balloon_prepare_slopcode_live_run_packet",
+			arguments: {
+				problemName: "file_backup",
+				host: "cline",
+				sessionId: "scbench-file-backup-live",
+				provider: "openai",
+				model: "gpt-5.4",
+			},
+		})) as {
+			structuredContent?: {
+				problemName?: string
+				host?: string
+				sessionId?: string
+				evidenceTarget?: { evidenceKind?: string; transcriptSource?: string; checkpoints?: number[] }
+				steps?: Array<{ stepId?: string; toolName?: string | null }>
+			}
+		}
+		const slopcodeLiveRunPacketWorked =
+			slopcodeLiveRunPacket.structuredContent?.problemName === "file_backup" &&
+			slopcodeLiveRunPacket.structuredContent?.host === "cline" &&
+			slopcodeLiveRunPacket.structuredContent?.sessionId === "scbench-file-backup-live" &&
+			slopcodeLiveRunPacket.structuredContent?.evidenceTarget?.evidenceKind === "live_llm" &&
+			slopcodeLiveRunPacket.structuredContent?.evidenceTarget?.transcriptSource === "live_host_session" &&
+			(slopcodeLiveRunPacket.structuredContent?.evidenceTarget?.checkpoints?.length ?? 0) >= 3 &&
+			(slopcodeLiveRunPacket.structuredContent?.steps?.some(
+				(step) => step.stepId === "record_evidence" && step.toolName === "balloon_record_slopcode_run_evidence",
+			) ??
+				false)
+		details.push(`slopcodeLiveRunPacketWorked=${slopcodeLiveRunPacketWorked ? "yes" : "no"}`)
+
 		const slopcodeEvidenceSummary = (await client.request("tools/call", {
 			name: "balloon_summarize_slopcode_run_evidence",
 			arguments: {
@@ -1070,6 +1103,9 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 		const starterRunbookUri = Array.isArray(resources.resources)
 			? resources.resources.find((resource) => resource?.uri === "balloon://benchmark/slopcode/starter-suite/runbook")?.uri
 			: undefined
+		const slopcodeLiveRunPlaybookUri = Array.isArray(resources.resources)
+			? resources.resources.find((resource) => resource?.uri === "balloon://benchmark/slopcode/live-run-playbook")?.uri
+			: undefined
 		const slopcodeEvidenceUri = Array.isArray(resources.resources)
 			? resources.resources.find((resource) => resource?.uri === "balloon://benchmark/slopcode/evidence")?.uri
 			: undefined
@@ -1109,6 +1145,9 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 		const starterRunbookResource = starterRunbookUri
 			? ((await client.request("resources/read", { uri: starterRunbookUri })) as { contents?: Array<{ text?: string }> })
 			: null
+		const slopcodeLiveRunPlaybookResource = slopcodeLiveRunPlaybookUri
+			? ((await client.request("resources/read", { uri: slopcodeLiveRunPlaybookUri })) as { contents?: Array<{ text?: string }> })
+			: null
 		const slopcodeEvidenceResource = slopcodeEvidenceUri
 			? ((await client.request("resources/read", { uri: slopcodeEvidenceUri })) as { contents?: Array<{ text?: string }> })
 			: null
@@ -1125,6 +1164,8 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			Boolean(pressureResource?.contents?.[0]?.text?.includes("\"trend\"")) &&
 			Boolean(starterSuiteResource?.contents?.[0]?.text?.includes("file_backup")) &&
 			Boolean(starterRunbookResource?.contents?.[0]?.text?.includes("\"executionOrder\"")) &&
+			Boolean(slopcodeLiveRunPlaybookResource?.contents?.[0]?.text?.includes("\"Balloon SlopCodeBench Live Run Playbook\"")) &&
+			Boolean(slopcodeLiveRunPlaybookResource?.contents?.[0]?.text?.includes("\"balloon_prepare_slopcode_live_run_packet\"")) &&
 			Boolean(slopcodeEvidenceResource?.contents?.[0]?.text?.includes("\"suiteName\": \"Balloon SlopCodeBench Evidence\"")) &&
 			Boolean(slopcodeEvidenceResource?.contents?.[0]?.text?.includes("\"coverage\": \"non_live_only\""))
 		details.push(`resourceReadWorked=${resourceReadWorked ? "yes" : "no"}`)
@@ -1155,6 +1196,7 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			slopcodeStarterSummaryWorked,
 			slopcodeStarterArtifactExportWorked,
 			slopcodeProblemPrepWorked,
+			slopcodeLiveRunPacketWorked,
 			slopcodeEvidenceRecordWorked,
 			slopcodeEvidenceSummaryWorked,
 			reviewDriftFallbackWorked,
@@ -1198,6 +1240,7 @@ export function formatBalloonMcpSmoke(result: SmokeResult): string {
 		`SCBench starter summary: ${result.slopcodeStarterSummaryWorked ? "PASS" : "FAIL"}`,
 		`SCBench starter artifact export: ${result.slopcodeStarterArtifactExportWorked ? "PASS" : "FAIL"}`,
 		`SCBench problem preparation: ${result.slopcodeProblemPrepWorked ? "PASS" : "FAIL"}`,
+		`SCBench live-run packet: ${result.slopcodeLiveRunPacketWorked ? "PASS" : "FAIL"}`,
 		`SCBench evidence record: ${result.slopcodeEvidenceRecordWorked ? "PASS" : "FAIL"}`,
 		`SCBench evidence summary: ${result.slopcodeEvidenceSummaryWorked ? "PASS" : "FAIL"}`,
 		`Review drift fallback: ${result.reviewDriftFallbackWorked ? "PASS" : "FAIL"}`,
@@ -1239,6 +1282,7 @@ async function main(): Promise<void> {
 			result.slopcodeStarterSummaryWorked &&
 			result.slopcodeStarterArtifactExportWorked &&
 			result.slopcodeProblemPrepWorked &&
+			result.slopcodeLiveRunPacketWorked &&
 			result.slopcodeEvidenceRecordWorked &&
 			result.slopcodeEvidenceSummaryWorked &&
 			result.reviewDriftFallbackWorked &&

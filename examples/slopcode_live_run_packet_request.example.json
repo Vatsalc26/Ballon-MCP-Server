@@ -1,0 +1,11 @@
+{
+  "tool": "balloon_prepare_slopcode_live_run_packet",
+  "arguments": {
+    "problemName": "file_backup",
+    "host": "vscode",
+    "sessionId": "REPLACE_WITH_YOUR_SESSION_ID",
+    "datasetRoot": "REPLACE_WITH_YOUR_SLOPCODEBENCH_ROOT",
+    "provider": "REPLACE_WITH_PROVIDER",
+    "model": "REPLACE_WITH_MODEL"
+  }
+}

@@ -410,6 +410,41 @@ export interface SlopCodeStarterSuiteSummary {
 	problems: SlopCodeStarterSuiteProblemSummary[]
 }
 
+export interface BalloonSlopCodeLiveRunStep {
+	stepId: "dataset_verify" | "host_validate" | "problem_prepare" | "live_run" | "score" | "record_evidence" | "export_artifacts"
+	title: string
+	goal: string
+	toolName: string | null
+	toolArgs: Record<string, unknown> | null
+	notes: string[]
+}
+
+export interface BalloonSlopCodeLiveRunPacket {
+	problemName: string
+	host: BalloonHostKind
+	hostDisplayName: string
+	sessionId: string
+	provider: string | null
+	model: string | null
+	datasetStatus: SlopCodeDatasetStatus
+	problemPreparation: SlopCodeProblemPreparation
+	evidenceTarget: {
+		evidenceKind: "live_llm"
+		transcriptSource: "live_host_session"
+		host: BalloonHostKind
+		provider: string | null
+		model: string | null
+		checkpointMode: LongSessionCheckpointMode
+		checkpoints: number[]
+	}
+	validationResourceUri: string
+	evidenceResourceUri: string
+	docsPath: string
+	warnings: string[]
+	claimBoundary: string[]
+	steps: BalloonSlopCodeLiveRunStep[]
+}
+
 export type BalloonSlopCodeEvidenceKind = "live_llm" | "manual_replay" | "fixture" | "synthetic_demo"
 
 export type BalloonSlopCodeTranscriptSource = "live_host_session" | "pasted_turns" | "fixture_turns" | "generated_demo"
