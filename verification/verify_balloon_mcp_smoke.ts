@@ -41,6 +41,7 @@ type SmokeResult = {
 	slopcodeLiveRunPacketWorked: boolean
 	slopcodeLiveRunBatchWorked: boolean
 	slopcodeLiveRunFinalizeWorked: boolean
+	slopcodeLiveRunBatchFinalizeWorked: boolean
 	slopcodeEvidenceRecordWorked: boolean
 	slopcodeEvidenceSummaryWorked: boolean
 	reviewDriftFallbackWorked: boolean
@@ -273,6 +274,7 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			hasTool(toolsList, "balloon_prepare_slopcode_live_run_packet") &&
 			hasTool(toolsList, "balloon_prepare_slopcode_live_run_batch") &&
 			hasTool(toolsList, "balloon_finalize_slopcode_live_run") &&
+			hasTool(toolsList, "balloon_finalize_slopcode_live_run_batch") &&
 			hasTool(toolsList, "balloon_record_slopcode_run_evidence") &&
 			hasTool(toolsList, "balloon_summarize_slopcode_run_evidence") &&
 			hasTool(toolsList, "balloon_review_session_drift")
@@ -1101,6 +1103,94 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			fs.existsSync(finalizedProblemMarkdownPath)
 		details.push(`slopcodeLiveRunFinalizeWorked=${slopcodeLiveRunFinalizeWorked ? "yes" : "no"}`)
 
+		const slopcodeBatchFinalizeOutputDir = path.join(dataDir, "slopcode-finalize-batch")
+		const finalizedSlopCodeBatch = (await client.request("tools/call", {
+			name: "balloon_finalize_slopcode_live_run_batch",
+			arguments: {
+				host: "vscode",
+				provider: "openai",
+				model: "gpt-5.4",
+				outputDir: slopcodeBatchFinalizeOutputDir,
+				runs: [
+					{
+						problemName: "file_backup",
+						sessionId: "scbench-file-backup",
+						evidenceKind: "manual_replay",
+						transcriptSource: "pasted_turns",
+						notes: ["Smoke verification reused the stored file_backup session for batch finalization."],
+					},
+					{
+						problemName: "trajectory_api",
+						sessionId: "scbench-vscode-live-trajectory-api",
+						host: "vscode",
+						evidenceKind: "manual_replay",
+						transcriptSource: "pasted_turns",
+						turns: [
+							{
+								role: "user",
+								content: "Checkpoint 1: extend the trajectory API with bounded lineage filters. Keep the existing API boundaries stable and preserve tests.",
+							},
+							{
+								role: "assistant",
+								content: "I would keep the current trajectory API boundaries stable, add bounded lineage filters directly, and preserve tests instead of widening the architecture.",
+							},
+							{
+								role: "user",
+								content: "Checkpoint 2: add safer validation around lineage traversal and keep concurrency notes explicit.",
+							},
+							{
+								role: "assistant",
+								content: "I would keep the same API boundaries, add safer lineage-traversal validation, preserve concurrency notes, and keep verification explicit.",
+							},
+							{
+								role: "user",
+								content: "Checkpoint 3: support bounded sandbox inspection without broad parser rewrites.",
+							},
+							{
+								role: "assistant",
+								content: "I would preserve the current API structure, add bounded sandbox inspection directly, avoid broad parser rewrites, and keep tests and validation visible.",
+							},
+							{
+								role: "user",
+								content: "Checkpoint 4: keep the smallest safe next step and preserve verification carry-forward.",
+							},
+							{
+								role: "assistant",
+								content: "I would keep the smallest safe bounded next step for the trajectory API, preserve tests, preserve validation notes, and avoid broad rewrites.",
+							},
+						],
+					},
+				],
+			},
+		})) as {
+			structuredContent?: {
+				outputDir?: string
+				summaryJsonPath?: string
+				summaryMarkdownPath?: string
+				finalizedProblemNames?: string[]
+				topLanes?: string[]
+				runs?: Array<{ problemName?: string; artifacts?: { problemJsonPath?: string | null; evidenceCoverage?: string } }>
+				evidenceSummary?: { coveredProblems?: number; liveCoveredProblems?: number }
+			}
+		}
+		const batchSummaryJsonPath = finalizedSlopCodeBatch.structuredContent?.summaryJsonPath
+		const batchSummaryMarkdownPath = finalizedSlopCodeBatch.structuredContent?.summaryMarkdownPath
+		const slopcodeLiveRunBatchFinalizeWorked =
+			finalizedSlopCodeBatch.structuredContent?.outputDir === slopcodeBatchFinalizeOutputDir &&
+			(finalizedSlopCodeBatch.structuredContent?.finalizedProblemNames?.includes("file_backup") ?? false) &&
+			(finalizedSlopCodeBatch.structuredContent?.finalizedProblemNames?.includes("trajectory_api") ?? false) &&
+			(finalizedSlopCodeBatch.structuredContent?.evidenceSummary?.coveredProblems ?? 0) >= 2 &&
+			(finalizedSlopCodeBatch.structuredContent?.evidenceSummary?.liveCoveredProblems ?? 0) === 0 &&
+			(finalizedSlopCodeBatch.structuredContent?.topLanes?.length ?? 0) >= 1 &&
+			(finalizedSlopCodeBatch.structuredContent?.runs?.some(
+				(run) => run.problemName === "trajectory_api" && run.artifacts?.evidenceCoverage === "non_live_only" && typeof run.artifacts?.problemJsonPath === "string",
+			) ?? false) &&
+			typeof batchSummaryJsonPath === "string" &&
+			typeof batchSummaryMarkdownPath === "string" &&
+			fs.existsSync(batchSummaryJsonPath) &&
+			fs.existsSync(batchSummaryMarkdownPath)
+		details.push(`slopcodeLiveRunBatchFinalizeWorked=${slopcodeLiveRunBatchFinalizeWorked ? "yes" : "no"}`)
+
 		const slopcodeEvidenceSummary = (await client.request("tools/call", {
 			name: "balloon_summarize_slopcode_run_evidence",
 			arguments: {
@@ -1290,6 +1380,7 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			Boolean(slopcodeLiveRunPlaybookResource?.contents?.[0]?.text?.includes("\"Balloon SlopCodeBench Live Run Playbook\"")) &&
 			Boolean(slopcodeLiveRunPlaybookResource?.contents?.[0]?.text?.includes("\"balloon_prepare_slopcode_live_run_packet\"")) &&
 			Boolean(slopcodeLiveRunPlaybookResource?.contents?.[0]?.text?.includes("\"balloon_finalize_slopcode_live_run\"")) &&
+			Boolean(slopcodeLiveRunPlaybookResource?.contents?.[0]?.text?.includes("\"balloon_finalize_slopcode_live_run_batch\"")) &&
 			Boolean(slopcodeLiveRunBatchResource?.contents?.[0]?.text?.includes("\"totalProblems\": 3")) &&
 			Boolean(slopcodeLiveRunBatchResource?.contents?.[0]?.text?.includes("\"file_backup\"")) &&
 			Boolean(slopcodeEvidenceResource?.contents?.[0]?.text?.includes("\"suiteName\": \"Balloon SlopCodeBench Evidence\"")) &&
@@ -1325,6 +1416,7 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			slopcodeLiveRunPacketWorked,
 			slopcodeLiveRunBatchWorked,
 			slopcodeLiveRunFinalizeWorked,
+			slopcodeLiveRunBatchFinalizeWorked,
 			slopcodeEvidenceRecordWorked,
 			slopcodeEvidenceSummaryWorked,
 			reviewDriftFallbackWorked,
@@ -1371,6 +1463,7 @@ export function formatBalloonMcpSmoke(result: SmokeResult): string {
 		`SCBench live-run packet: ${result.slopcodeLiveRunPacketWorked ? "PASS" : "FAIL"}`,
 		`SCBench live-run batch: ${result.slopcodeLiveRunBatchWorked ? "PASS" : "FAIL"}`,
 		`SCBench live-run finalize: ${result.slopcodeLiveRunFinalizeWorked ? "PASS" : "FAIL"}`,
+		`SCBench live-run batch finalize: ${result.slopcodeLiveRunBatchFinalizeWorked ? "PASS" : "FAIL"}`,
 		`SCBench evidence record: ${result.slopcodeEvidenceRecordWorked ? "PASS" : "FAIL"}`,
 		`SCBench evidence summary: ${result.slopcodeEvidenceSummaryWorked ? "PASS" : "FAIL"}`,
 		`Review drift fallback: ${result.reviewDriftFallbackWorked ? "PASS" : "FAIL"}`,
@@ -1415,6 +1508,7 @@ async function main(): Promise<void> {
 			result.slopcodeLiveRunPacketWorked &&
 			result.slopcodeLiveRunBatchWorked &&
 			result.slopcodeLiveRunFinalizeWorked &&
+			result.slopcodeLiveRunBatchFinalizeWorked &&
 			result.slopcodeEvidenceRecordWorked &&
 			result.slopcodeEvidenceSummaryWorked &&
 			result.reviewDriftFallbackWorked &&

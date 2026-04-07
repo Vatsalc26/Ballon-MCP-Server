@@ -492,6 +492,22 @@ export interface BalloonSlopCodeLiveRunFinalization {
 	nextActions: string[]
 }
 
+export interface BalloonSlopCodeLiveRunBatchFinalization {
+	host: BalloonHostKind | null
+	provider: string | null
+	model: string | null
+	datasetStatus: SlopCodeDatasetStatus | null
+	outputDir: string
+	summaryJsonPath: string
+	summaryMarkdownPath: string
+	finalizedProblemNames: string[]
+	evidenceSummary: BalloonSlopCodeEvidenceSummary
+	topLanes: Array<BalloonBenchmarkLaneScore["lane"]>
+	warnings: string[]
+	nextActions: string[]
+	runs: BalloonSlopCodeLiveRunFinalization[]
+}
+
 export type BalloonSlopCodeEvidenceKind = "live_llm" | "manual_replay" | "fixture" | "synthetic_demo"
 
 export type BalloonSlopCodeTranscriptSource = "live_host_session" | "pasted_turns" | "fixture_turns" | "generated_demo"

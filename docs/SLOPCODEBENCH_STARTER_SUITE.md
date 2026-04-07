@@ -38,17 +38,18 @@ Use:
 6. `balloon_prepare_slopcode_live_run_packet`
 7. `balloon_prepare_slopcode_live_run_batch`
 8. `balloon_finalize_slopcode_live_run`
-9. `balloon_record_slopcode_run_evidence`
-10. `balloon_summarize_slopcode_run_evidence`
-11. `balloon_summarize_slopcode_starter_suite`
-12. `balloon_export_slopcode_starter_artifacts`
-13. `balloon://benchmark/slopcode/starter-suite`
-14. `balloon://benchmark/slopcode/starter-suite/runbook`
-15. `balloon://benchmark/slopcode/live-run-playbook`
-16. `balloon://benchmark/slopcode/live-run-batch`
-17. `balloon://benchmark/slopcode/evidence`
-18. `balloon://benchmark/slopcode/evidence/{problemName}`
-19. `balloon://benchmark/slopcode/problems/{problemName}`
+9. `balloon_finalize_slopcode_live_run_batch`
+10. `balloon_record_slopcode_run_evidence`
+11. `balloon_summarize_slopcode_run_evidence`
+12. `balloon_summarize_slopcode_starter_suite`
+13. `balloon_export_slopcode_starter_artifacts`
+14. `balloon://benchmark/slopcode/starter-suite`
+15. `balloon://benchmark/slopcode/starter-suite/runbook`
+16. `balloon://benchmark/slopcode/live-run-playbook`
+17. `balloon://benchmark/slopcode/live-run-batch`
+18. `balloon://benchmark/slopcode/evidence`
+19. `balloon://benchmark/slopcode/evidence/{problemName}`
+20. `balloon://benchmark/slopcode/problems/{problemName}`
 
 ## Fast Starter Workflow
 
@@ -65,9 +66,10 @@ Use:
 11. if you stretch the same session across multiple checkpoints, score the whole checkpoint batch with `balloon_score_long_session_benchmark`
 12. for SCBench starter sequences, treat those checkpoint numbers as assistant-turn ordinals and set `checkpointMode: assistant_checkpoint`
 13. preferably finalize the rerun in one pass with `balloon_finalize_slopcode_live_run`
-14. if you need the manual path, record whether the run was live, replayed, fixture-based, or synthetic with `balloon_record_slopcode_run_evidence`
-15. after several problem sessions exist, roll them up with `balloon_summarize_slopcode_run_evidence` and `balloon_summarize_slopcode_starter_suite`
-16. export the suite bundle with `balloon_export_slopcode_starter_artifacts`
+14. when several starter problems are done, refresh the shared bundle with `balloon_finalize_slopcode_live_run_batch`
+15. if you need the manual path, record whether the run was live, replayed, fixture-based, or synthetic with `balloon_record_slopcode_run_evidence`
+16. after several problem sessions exist, roll them up with `balloon_summarize_slopcode_run_evidence` and `balloon_summarize_slopcode_starter_suite`
+17. export the suite bundle with `balloon_export_slopcode_starter_artifacts`
 
 ## Recommended First Order
 

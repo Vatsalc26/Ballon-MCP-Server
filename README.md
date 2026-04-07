@@ -169,13 +169,14 @@ Tools:
 25. `balloon_prepare_slopcode_live_run_packet`
 26. `balloon_prepare_slopcode_live_run_batch`
 27. `balloon_finalize_slopcode_live_run`
-28. `balloon_record_slopcode_run_evidence`
-29. `balloon_summarize_slopcode_run_evidence`
-30. `balloon_summarize_slopcode_starter_suite`
-31. `balloon_export_slopcode_starter_artifacts`
-32. `balloon_review_session_drift`
-33. `balloon_update_memory_ledger`
-34. `balloon_explain_gap_report`
+28. `balloon_finalize_slopcode_live_run_batch`
+29. `balloon_record_slopcode_run_evidence`
+30. `balloon_summarize_slopcode_run_evidence`
+31. `balloon_summarize_slopcode_starter_suite`
+32. `balloon_export_slopcode_starter_artifacts`
+33. `balloon_review_session_drift`
+34. `balloon_update_memory_ledger`
+35. `balloon_explain_gap_report`
 
 Prompts:
 
@@ -243,6 +244,8 @@ If you want Balloon to hand you the full true-live rerun packet for a host/probl
 If you want the whole starter-suite rerun pass prepared in one shot, use `balloon_prepare_slopcode_live_run_batch`.
 
 If you want to paste the final transcript once and have Balloon score it, record the evidence, and export the artifact bundle in one pass, use `balloon_finalize_slopcode_live_run`.
+
+If you want to refresh a whole starter-suite pass together after several real runs, use `balloon_finalize_slopcode_live_run_batch`.
 
 If you want repo-backed SCBench summary bundles, use `balloon_export_slopcode_starter_artifacts`. Those exports now include both pressure traces and live-vs-replay evidence coverage.
 

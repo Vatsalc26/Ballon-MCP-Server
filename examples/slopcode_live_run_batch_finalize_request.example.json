@@ -1,0 +1,24 @@
+{
+  "tool": "balloon_finalize_slopcode_live_run_batch",
+  "arguments": {
+    "host": "vscode",
+    "provider": "openai",
+    "model": "gpt-5.4",
+    "datasetRoot": "REPLACE_WITH_YOUR_SLOPCODEBENCH_ROOT",
+    "outputDir": "REPLACE_WITH_YOUR_BATCH_OUTPUT_DIR",
+    "runs": [
+      {
+        "problemName": "file_backup",
+        "sessionId": "REPLACE_WITH_YOUR_SESSION_ID_FILE_BACKUP",
+        "evidenceKind": "live_llm",
+        "transcriptSource": "live_host_session"
+      },
+      {
+        "problemName": "execution_server",
+        "sessionId": "REPLACE_WITH_YOUR_SESSION_ID_EXECUTION_SERVER",
+        "evidenceKind": "live_llm",
+        "transcriptSource": "live_host_session"
+      }
+    ]
+  }
+}

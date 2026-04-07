@@ -172,6 +172,7 @@ export async function runBalloonPublicPackHarness(rootDir = resolveRootDir()): P
 		"examples/slopcode_live_run_packet_request.example.json",
 		"examples/slopcode_live_run_batch_request.example.json",
 		"examples/slopcode_live_run_finalize_request.example.json",
+		"examples/slopcode_live_run_batch_finalize_request.example.json",
 		"examples/slopcode_run_evidence_request.example.json",
 		"examples/slopcode_run_evidence_summary_request.example.json",
 	]
@@ -244,6 +245,7 @@ export async function runBalloonPublicPackHarness(rootDir = resolveRootDir()): P
 			"`balloon_prepare_slopcode_live_run_packet`",
 			"`balloon_prepare_slopcode_live_run_batch`",
 			"`balloon_finalize_slopcode_live_run`",
+			"`balloon_finalize_slopcode_live_run_batch`",
 			"`balloon_summarize_slopcode_run_evidence`",
 			"`balloon_export_slopcode_starter_artifacts`",
 		]) &&
@@ -251,6 +253,7 @@ export async function runBalloonPublicPackHarness(rootDir = resolveRootDir()): P
 			"`balloon_prepare_slopcode_live_run_packet`",
 			"`balloon_prepare_slopcode_live_run_batch`",
 			"`balloon_finalize_slopcode_live_run`",
+			"`balloon_finalize_slopcode_live_run_batch`",
 			"`balloon_summarize_slopcode_run_evidence`",
 			"`balloon_export_slopcode_starter_artifacts`",
 		])
@@ -311,6 +314,10 @@ export async function runBalloonPublicPackHarness(rootDir = resolveRootDir()): P
 		{
 			relativePath: "examples/slopcode_live_run_finalize_request.example.json",
 			requiredSnippets: ["REPLACE_WITH_YOUR_SESSION_ID", "REPLACE_WITH_REAL_LIVE_OR_REPLAY_TURN_1"],
+		},
+		{
+			relativePath: "examples/slopcode_live_run_batch_finalize_request.example.json",
+			requiredSnippets: ["REPLACE_WITH_YOUR_BATCH_OUTPUT_DIR", "REPLACE_WITH_YOUR_SESSION_ID_FILE_BACKUP"],
 		},
 		{
 			relativePath: "examples/vscode_mcp.example.json",

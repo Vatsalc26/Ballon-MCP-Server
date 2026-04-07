@@ -44,7 +44,8 @@ If you want the first recommended real-problem set after verification, use:
 5. `balloon_prepare_slopcode_live_run_packet`
 6. `balloon_prepare_slopcode_live_run_batch`
 7. `balloon_finalize_slopcode_live_run`
-8. `balloon_score_benchmark_lanes`
+8. `balloon_finalize_slopcode_live_run_batch`
+9. `balloon_score_benchmark_lanes`
 
 For SCBench starter-suite reruns, the recommended checkpoint numbers are assistant-turn ordinals. Use `checkpointMode: assistant_checkpoint` when you score the whole sequence with `balloon_score_long_session_benchmark`.
 
@@ -96,6 +97,8 @@ Use `balloon_prepare_slopcode_live_run_packet` when you want Balloon to hand you
 Use `balloon_prepare_slopcode_live_run_batch` when you want the whole starter-suite rerun pass prepared together instead of one problem at a time.
 
 Use `balloon_finalize_slopcode_live_run` after the real rerun when you want Balloon to score the recommended checkpoint batch, record the run, and export the starter artifact bundle in one step.
+
+Use `balloon_finalize_slopcode_live_run_batch` when you want one shared bundle refreshed after multiple starter problems were completed in separate live sessions.
 
 Use `balloon_summarize_slopcode_run_evidence` or read `balloon://benchmark/slopcode/evidence` before making public benchmark claims.
 
@@ -178,8 +181,9 @@ Use these starting fixtures:
 11. [../examples/slopcode_live_run_packet_request.example.json](../examples/slopcode_live_run_packet_request.example.json)
 12. [../examples/slopcode_live_run_batch_request.example.json](../examples/slopcode_live_run_batch_request.example.json)
 13. [../examples/slopcode_live_run_finalize_request.example.json](../examples/slopcode_live_run_finalize_request.example.json)
-14. [../examples/slopcode_run_evidence_request.example.json](../examples/slopcode_run_evidence_request.example.json)
-15. [../examples/slopcode_run_evidence_summary_request.example.json](../examples/slopcode_run_evidence_summary_request.example.json)
+14. [../examples/slopcode_live_run_batch_finalize_request.example.json](../examples/slopcode_live_run_batch_finalize_request.example.json)
+15. [../examples/slopcode_run_evidence_request.example.json](../examples/slopcode_run_evidence_request.example.json)
+16. [../examples/slopcode_run_evidence_summary_request.example.json](../examples/slopcode_run_evidence_summary_request.example.json)
 
 They are not "official benchmark wins."
 

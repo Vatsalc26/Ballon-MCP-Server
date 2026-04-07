@@ -34,6 +34,7 @@ import type {
 	BalloonSlopCodeEvidenceSummary,
 	BalloonSlopCodeEvidenceCoverage,
 	BalloonSlopCodeEvidenceKind,
+	BalloonSlopCodeLiveRunBatchFinalization,
 	BalloonSlopCodeLiveRunFinalization,
 	BalloonSlopCodeLiveRunBatchPacket,
 	BalloonSlopCodeLiveRunFinalizationArtifacts,
@@ -1733,7 +1734,43 @@ function formatSlopCodeLiveRunBatchPacket(batch: BalloonSlopCodeLiveRunBatchPack
 	].join("\n")
 }
 
-function buildSlopCodeLiveRunFinalization(
+type SlopCodeLiveRunFinalizationCore = Omit<BalloonSlopCodeLiveRunFinalization, "artifacts" | "warnings" | "nextActions">
+
+function buildSlopCodeFinalizationArtifacts(
+	bundle: StarterSuiteArtifactExportBundle,
+	problemName: string,
+): BalloonSlopCodeLiveRunFinalizationArtifacts {
+	const problemArtifact = bundle.problems.find((problem) => problem.problemName === problemName) ?? null
+	return {
+		outputDir: bundle.outputDir,
+		summaryJsonPath: bundle.summaryJsonPath,
+		summaryMarkdownPath: bundle.summaryMarkdownPath,
+		problemJsonPath: problemArtifact?.jsonPath ?? null,
+		problemMarkdownPath: problemArtifact?.markdownPath ?? null,
+		evidenceCoverage: problemArtifact?.evidenceSummary.coverage ?? "not_run",
+		topLanes: problemArtifact?.topLanes ?? [],
+		evidenceAlerts: problemArtifact?.evidenceAlerts ?? [],
+		pressureAlerts: problemArtifact?.pressureAlerts ?? [],
+	}
+}
+
+function attachSlopCodeFinalizationArtifacts(
+	core: SlopCodeLiveRunFinalizationCore,
+	artifacts: BalloonSlopCodeLiveRunFinalizationArtifacts,
+): BalloonSlopCodeLiveRunFinalization {
+	return {
+		...core,
+		artifacts,
+		warnings: uniqueStrings([...artifacts.evidenceAlerts, ...artifacts.pressureAlerts]),
+		nextActions: [
+			"Inspect the exported Markdown artifact before making any public benchmark claim.",
+			"Keep the same session id for reruns of the same problem so Balloon can compare pressure traces cleanly.",
+			"After multiple problems are finalized, export the full starter suite again to refresh the shared summary bundle.",
+		],
+	}
+}
+
+function buildSlopCodeLiveRunFinalizationCore(
 	store: BalloonStateStore,
 	options: BenchmarkLaneOptions & {
 		problemName?: unknown
@@ -1748,9 +1785,8 @@ function buildSlopCodeLiveRunFinalization(
 		evidenceKind?: unknown
 		transcriptSource?: unknown
 		notes?: unknown
-		outputDir?: unknown
 	},
-): BalloonSlopCodeLiveRunFinalization | null {
+): (SlopCodeLiveRunFinalizationCore & { warningsBase: string[] }) | null {
 	const problemName = asString(options.problemName)
 	if (!problemName) return null
 	const datasetRoot = asString(options.datasetRoot)
@@ -1819,31 +1855,6 @@ function buildSlopCodeLiveRunFinalization(
 	}
 	store.saveSlopCodeRunEvidence(evidence)
 
-	const artifactBundle = buildStarterSuiteArtifactExport(store, {
-		datasetRoot,
-		problemNames: [problemName],
-		outputDir: asString(options.outputDir),
-		semanticAdapterPath: options.semanticAdapterPath,
-		semanticTimeoutMs: options.semanticTimeoutMs,
-		semanticMaxNotes: options.semanticMaxNotes,
-		forceStageCount: preparation.entry.recommendedForceStageCount,
-		stageThresholds: preparation.entry.recommendedLongSessionThresholds,
-	})
-	if (!artifactBundle) return null
-
-	const problemArtifact = artifactBundle.problems.find((problem) => problem.problemName === problemName) ?? null
-	const artifacts: BalloonSlopCodeLiveRunFinalizationArtifacts = {
-		outputDir: artifactBundle.outputDir,
-		summaryJsonPath: artifactBundle.summaryJsonPath,
-		summaryMarkdownPath: artifactBundle.summaryMarkdownPath,
-		problemJsonPath: problemArtifact?.jsonPath ?? null,
-		problemMarkdownPath: problemArtifact?.markdownPath ?? null,
-		evidenceCoverage: problemArtifact?.evidenceSummary.coverage ?? "not_run",
-		topLanes: problemArtifact?.topLanes ?? [],
-		evidenceAlerts: problemArtifact?.evidenceAlerts ?? [],
-		pressureAlerts: problemArtifact?.pressureAlerts ?? [],
-	}
-
 	return {
 		problemName,
 		sessionId,
@@ -1858,13 +1869,50 @@ function buildSlopCodeLiveRunFinalization(
 		datasetStatus,
 		scoreResult,
 		evidence,
-		artifacts,
-		warnings: uniqueStrings([...warnings, ...artifacts.evidenceAlerts, ...artifacts.pressureAlerts]),
-		nextActions: [
-			"Inspect the exported Markdown artifact before making any public benchmark claim.",
-			"Keep the same session id for reruns of the same problem so Balloon can compare pressure traces cleanly.",
-			"After multiple problems are finalized, export the full starter suite again to refresh the shared summary bundle.",
-		],
+		warningsBase: warnings,
+	}
+}
+
+function buildSlopCodeLiveRunFinalization(
+	store: BalloonStateStore,
+	options: BenchmarkLaneOptions & {
+		problemName?: unknown
+		sessionId?: unknown
+		turns?: unknown
+		mergeMode?: unknown
+		host?: unknown
+		provider?: unknown
+		model?: unknown
+		datasetRoot?: unknown
+		datasetVerificationStatus?: unknown
+		evidenceKind?: unknown
+		transcriptSource?: unknown
+		notes?: unknown
+		outputDir?: unknown
+	},
+): BalloonSlopCodeLiveRunFinalization | null {
+	const core = buildSlopCodeLiveRunFinalizationCore(store, options)
+	if (!core) return null
+	const datasetRoot = asString(options.datasetRoot)
+	const preparation = buildSlopCodeProblemPreparation(core.problemName, datasetRoot ?? undefined)
+	if (!preparation) return null
+
+	const artifactBundle = buildStarterSuiteArtifactExport(store, {
+		datasetRoot,
+		problemNames: [core.problemName],
+		outputDir: asString(options.outputDir),
+		semanticAdapterPath: options.semanticAdapterPath,
+		semanticTimeoutMs: options.semanticTimeoutMs,
+		semanticMaxNotes: options.semanticMaxNotes,
+		forceStageCount: preparation.entry.recommendedForceStageCount,
+		stageThresholds: preparation.entry.recommendedLongSessionThresholds,
+	})
+	if (!artifactBundle) return null
+
+	const artifacts = buildSlopCodeFinalizationArtifacts(artifactBundle, core.problemName)
+	return {
+		...attachSlopCodeFinalizationArtifacts(core, artifacts),
+		warnings: uniqueStrings([...core.warningsBase, ...artifacts.evidenceAlerts, ...artifacts.pressureAlerts]),
 	}
 }
 
@@ -1907,6 +1955,137 @@ function formatSlopCodeLiveRunFinalization(result: BalloonSlopCodeLiveRunFinaliz
 	].join("\n")
 }
 
+function buildSlopCodeLiveRunBatchFinalization(
+	store: BalloonStateStore,
+	options: BenchmarkLaneOptions & {
+		host?: unknown
+		provider?: unknown
+		model?: unknown
+		datasetRoot?: unknown
+		datasetVerificationStatus?: unknown
+		outputDir?: unknown
+		runs?: unknown
+	},
+): BalloonSlopCodeLiveRunBatchFinalization | null {
+	const datasetRoot = asString(options.datasetRoot)
+	const batchHost = asString(options.host) ? parseHostKind(options.host) : null
+	const batchProvider = asString(options.provider)
+	const batchModel = asString(options.model)
+	const rawRuns = Array.isArray(options.runs) ? options.runs : []
+	if (rawRuns.length === 0) return null
+
+	const cores: Array<SlopCodeLiveRunFinalizationCore & { warningsBase: string[] }> = []
+	const finalizedProblemNames: string[] = []
+	const warnings: string[] = []
+	let batchDatasetStatus: SlopCodeStarterSuiteResult["datasetStatus"] | null = null
+
+	for (const entry of rawRuns) {
+		const record = asRecordValue(entry)
+		if (!record) continue
+		const core = buildSlopCodeLiveRunFinalizationCore(store, {
+			problemName: record.problemName,
+			sessionId: record.sessionId,
+			turns: record.turns,
+			mergeMode: record.mergeMode,
+			host: record.host ?? batchHost,
+			provider: record.provider ?? batchProvider,
+			model: record.model ?? batchModel,
+			datasetRoot: record.datasetRoot ?? datasetRoot,
+			datasetVerificationStatus: record.datasetVerificationStatus ?? options.datasetVerificationStatus,
+			evidenceKind: record.evidenceKind,
+			transcriptSource: record.transcriptSource,
+			notes: record.notes,
+			semanticAdapterPath: options.semanticAdapterPath,
+			semanticTimeoutMs: options.semanticTimeoutMs,
+			semanticMaxNotes: options.semanticMaxNotes,
+		})
+		if (!core) continue
+		cores.push(core)
+		finalizedProblemNames.push(core.problemName)
+		warnings.push(...core.warningsBase)
+		if (!batchDatasetStatus) batchDatasetStatus = core.datasetStatus
+	}
+
+	if (cores.length === 0) return null
+
+	const artifactBundle = buildStarterSuiteArtifactExport(store, {
+		datasetRoot,
+		problemNames: finalizedProblemNames,
+		outputDir: asString(options.outputDir),
+		semanticAdapterPath: options.semanticAdapterPath,
+		semanticTimeoutMs: options.semanticTimeoutMs,
+		semanticMaxNotes: options.semanticMaxNotes,
+	})
+	if (!artifactBundle) return null
+
+	const runs = cores.map((core) => {
+		const artifacts = buildSlopCodeFinalizationArtifacts(artifactBundle, core.problemName)
+		return {
+			...attachSlopCodeFinalizationArtifacts(core, artifacts),
+			warnings: uniqueStrings([...core.warningsBase, ...artifacts.evidenceAlerts, ...artifacts.pressureAlerts]),
+		}
+	})
+
+	return {
+		host: batchHost,
+		provider: batchProvider,
+		model: batchModel,
+		datasetStatus: batchDatasetStatus,
+		outputDir: artifactBundle.outputDir,
+		summaryJsonPath: artifactBundle.summaryJsonPath,
+		summaryMarkdownPath: artifactBundle.summaryMarkdownPath,
+		finalizedProblemNames: uniqueStrings(finalizedProblemNames),
+		evidenceSummary: artifactBundle.evidenceSummary,
+		topLanes: artifactBundle.topLanes,
+		warnings: uniqueStrings([
+			...warnings,
+			...artifactBundle.evidenceAlerts,
+			...artifactBundle.pressureAlerts,
+			...artifactBundle.regressions,
+		]),
+		nextActions: [
+			"Inspect the batch summary Markdown before making any public benchmark claim.",
+			"Use the same session ids for reruns of the same problems so pressure traces stay comparable.",
+			"After the first true VS Code run, repeat the same path for Cline or Roo instead of changing the scoring rules.",
+		],
+		runs,
+	}
+}
+
+function formatSlopCodeLiveRunBatchFinalization(result: BalloonSlopCodeLiveRunBatchFinalization): string {
+	return [
+		`Host: ${result.host ?? "mixed / unspecified"}`,
+		`Provider: ${result.provider ?? "unspecified"}`,
+		`Model: ${result.model ?? "unspecified"}`,
+		`Problems: ${result.finalizedProblemNames.join(", ")}`,
+		"",
+		...(result.datasetStatus ? ["Dataset status", formatSlopCodeDatasetStatus(result.datasetStatus), ""] : []),
+		"Artifacts",
+		`Output directory: ${result.outputDir}`,
+		`Summary JSON: ${result.summaryJsonPath}`,
+		`Summary Markdown: ${result.summaryMarkdownPath}`,
+		`Problems with live evidence: ${result.evidenceSummary.liveCoveredProblems}/${result.evidenceSummary.problems.length}`,
+		`Top lane(s): ${result.topLanes.join(", ") || "none"}`,
+		"",
+		"Warnings",
+		...(result.warnings.length > 0 ? result.warnings.map((warning, index) => `${index + 1}. ${warning}`) : ["None recorded."]),
+		"",
+		"Next actions",
+		...result.nextActions.map((action, index) => `${index + 1}. ${action}`),
+		"",
+		"Runs",
+		...result.runs.flatMap((run, index) => [
+			`${index + 1}. ${run.problemName}`,
+			`Session id: ${run.sessionId}`,
+			`Evidence kind: ${run.evidence.evidenceKind}`,
+			`Evidence coverage: ${run.artifacts.evidenceCoverage}`,
+			`Top lane(s): ${run.artifacts.topLanes.join(", ") || "none"}`,
+			`Problem JSON: ${run.artifacts.problemJsonPath ?? "none"}`,
+			`Problem Markdown: ${run.artifacts.problemMarkdownPath ?? "none"}`,
+		]),
+	].join("\n")
+}
+
 function buildSlopCodeLiveRunPlaybook(): JsonRecord {
 	const starterSuite = buildSlopCodeStarterSuite()
 	return {
@@ -1916,6 +2095,7 @@ function buildSlopCodeLiveRunPlaybook(): JsonRecord {
 			"balloon_prepare_slopcode_live_run_packet",
 			"balloon_prepare_slopcode_live_run_batch",
 			"balloon_finalize_slopcode_live_run",
+			"balloon_finalize_slopcode_live_run_batch",
 			"balloon_summarize_slopcode_run_evidence",
 			"balloon_export_slopcode_starter_artifacts",
 		],
@@ -1944,6 +2124,7 @@ function buildSlopCodeLiveRunPlaybook(): JsonRecord {
 			"Use manual_replay, fixture, or synthetic_demo when the turns were reconstructed or generated.",
 			"Keep the exported bundle and evidence ledger aligned before making public benchmark claims.",
 			"Prefer balloon_finalize_slopcode_live_run after each real rerun so score, evidence, and artifacts stay tied to the same session.",
+			"When several starter problems are done together, use balloon_finalize_slopcode_live_run_batch to refresh the shared bundle in one pass.",
 		],
 	} satisfies JsonRecord
 }
@@ -2713,6 +2894,7 @@ const BENCHMARK_SURFACE_TOOL_NAMES = [
 	"balloon_prepare_slopcode_live_run_packet",
 	"balloon_prepare_slopcode_live_run_batch",
 	"balloon_finalize_slopcode_live_run",
+	"balloon_finalize_slopcode_live_run_batch",
 	"balloon_record_slopcode_run_evidence",
 	"balloon_summarize_slopcode_run_evidence",
 	"balloon_summarize_slopcode_starter_suite",
@@ -5069,6 +5251,87 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					)
 				}
 				return textResult(formatSlopCodeLiveRunFinalization(result), result as unknown as JsonRecord)
+			},
+		},
+		{
+			name: "balloon_finalize_slopcode_live_run_batch",
+			title: "Finalize SlopCodeBench Live Run Batch",
+			description:
+				"Finalizes several starter-suite SCBench runs together so Balloon can score them, record evidence, and refresh one shared starter-suite artifact bundle in a single tool call.",
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["runs"],
+				properties: {
+					host: {
+						type: "string",
+						enum: ["vscode", "cline", "roo_code", "claude_desktop", "generic_json"],
+						description: "Optional default host applied to runs that do not set their own host.",
+					},
+					provider: { type: "string", description: "Optional default provider applied to runs that do not override it." },
+					model: { type: "string", description: "Optional default model applied to runs that do not override it." },
+					datasetRoot: { type: "string", description: "Optional shared SlopCodeBench dataset root for the batch." },
+					datasetVerificationStatus: {
+						type: "string",
+						enum: ["verified", "partial", "missing"],
+						description: "Optional explicit dataset verification status for backfilled runs without a dataset root.",
+					},
+					outputDir: { type: "string", description: "Optional output directory for the shared artifact bundle." },
+					semanticAdapterPath: { type: "string", description: "Optional semantic adapter path for the assist lane." },
+					semanticTimeoutMs: { type: "number", description: "Optional semantic adapter timeout in milliseconds." },
+					semanticMaxNotes: { type: "number", description: "Optional cap on semantic notes returned." },
+					runs: {
+						type: "array",
+						description: "One entry per starter-suite rerun to finalize.",
+						items: {
+							type: "object",
+							properties: {
+								problemName: { type: "string" },
+								sessionId: { type: "string" },
+								mergeMode: { type: "string", enum: ["replace", "append"] },
+								host: { type: "string", enum: ["vscode", "cline", "roo_code", "claude_desktop", "generic_json"] },
+								provider: { type: "string" },
+								model: { type: "string" },
+								evidenceKind: { type: "string", enum: ["live_llm", "manual_replay", "fixture", "synthetic_demo"] },
+								transcriptSource: { type: "string", enum: ["live_host_session", "pasted_turns", "fixture_turns", "generated_demo"] },
+								datasetRoot: { type: "string" },
+								datasetVerificationStatus: { type: "string", enum: ["verified", "partial", "missing"] },
+								notes: { type: "array", items: { type: "string" } },
+								turns: {
+									type: "array",
+									items: {
+										type: "object",
+										properties: {
+											role: { type: "string", enum: ["user", "assistant", "system"] },
+											content: { type: "string" },
+											timestamp: { type: "string" },
+										},
+										required: ["role", "content"],
+									},
+								},
+							},
+							required: ["problemName"],
+						},
+					},
+				},
+			},
+			run: (args, context) => {
+				const result = buildSlopCodeLiveRunBatchFinalization(context.store, {
+					host: args.host,
+					provider: args.provider,
+					model: args.model,
+					datasetRoot: args.datasetRoot,
+					datasetVerificationStatus: args.datasetVerificationStatus,
+					outputDir: args.outputDir,
+					semanticAdapterPath: args.semanticAdapterPath,
+					semanticTimeoutMs: args.semanticTimeoutMs,
+					semanticMaxNotes: args.semanticMaxNotes,
+					runs: args.runs,
+				})
+				if (!result) {
+					return toolError("Balloon could not finalize the SCBench batch. Provide at least one valid run entry and either turns or an already stored session transcript.")
+				}
+				return textResult(formatSlopCodeLiveRunBatchFinalization(result), result as unknown as JsonRecord)
 			},
 		},
 		{
