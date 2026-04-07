@@ -391,6 +391,8 @@ export interface SlopCodeStarterBenchmarkPlan {
 export interface SlopCodeStarterSuiteProblemSummary {
 	problemName: string
 	sessionId: string
+	recommendedSessionId: string
+	sessionSource: "recommended" | "evidence_recent" | "none"
 	recommendedCheckpoints: number[]
 	sessionPresent: boolean
 	executedCheckpoints: number[]
@@ -411,7 +413,7 @@ export interface SlopCodeStarterSuiteSummary {
 }
 
 export interface BalloonSlopCodeLiveRunStep {
-	stepId: "dataset_verify" | "host_validate" | "problem_prepare" | "live_run" | "score" | "record_evidence" | "export_artifacts"
+	stepId: "dataset_verify" | "host_validate" | "problem_prepare" | "live_run" | "score" | "record_evidence" | "export_artifacts" | "finalize_run"
 	title: string
 	goal: string
 	toolName: string | null
@@ -457,6 +459,37 @@ export interface BalloonSlopCodeLiveRunBatchPacket {
 	warnings: string[]
 	nextActions: string[]
 	packets: BalloonSlopCodeLiveRunPacket[]
+}
+
+export interface BalloonSlopCodeLiveRunFinalizationArtifacts {
+	outputDir: string
+	summaryJsonPath: string
+	summaryMarkdownPath: string
+	problemJsonPath: string | null
+	problemMarkdownPath: string | null
+	evidenceCoverage: BalloonSlopCodeEvidenceCoverage
+	topLanes: Array<BalloonBenchmarkLaneScore["lane"]>
+	evidenceAlerts: string[]
+	pressureAlerts: string[]
+}
+
+export interface BalloonSlopCodeLiveRunFinalization {
+	problemName: string
+	sessionId: string
+	recommendedSessionId: string
+	sessionSource: "recommended" | "evidence_recent"
+	host: BalloonHostKind | null
+	provider: string | null
+	model: string | null
+	mergeMode: "replace" | "append"
+	turnsMerged: number
+	totalTurnCount: number
+	datasetStatus: SlopCodeDatasetStatus
+	scoreResult: LongSessionBenchmarkScoreResult
+	evidence: BalloonSlopCodeRunEvidence
+	artifacts: BalloonSlopCodeLiveRunFinalizationArtifacts
+	warnings: string[]
+	nextActions: string[]
 }
 
 export type BalloonSlopCodeEvidenceKind = "live_llm" | "manual_replay" | "fixture" | "synthetic_demo"

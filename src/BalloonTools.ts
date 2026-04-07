@@ -34,7 +34,9 @@ import type {
 	BalloonSlopCodeEvidenceSummary,
 	BalloonSlopCodeEvidenceCoverage,
 	BalloonSlopCodeEvidenceKind,
+	BalloonSlopCodeLiveRunFinalization,
 	BalloonSlopCodeLiveRunBatchPacket,
+	BalloonSlopCodeLiveRunFinalizationArtifacts,
 	BalloonSlopCodeLiveRunPacket,
 	BalloonSlopCodeProblemEvidenceSummary,
 	BalloonSlopCodeRunEvidence,
@@ -1101,13 +1103,33 @@ function buildSlopCodeStarterSuiteSummary(
 	const problems = plan.problems
 		.filter((problem) => (selectedProblems ? selectedProblems.has(problem.problemName) : true))
 		.map((problem) => {
-			const sessionTurns = store.getTurns(problem.recommendedSessionId, 5000)
+			const evidenceSummaryForProblem =
+				evidenceByProblem.get(problem.problemName) ??
+				({
+					problemName: problem.problemName,
+					totalRuns: 0,
+					liveRuns: 0,
+					manualReplayRuns: 0,
+					fixtureRuns: 0,
+					syntheticDemoRuns: 0,
+					coverage: "not_run",
+					latestEvidenceKind: null,
+					latestHost: null,
+					latestProvider: null,
+					latestModel: null,
+					latestSessionId: null,
+					latestRecordedAt: null,
+					notes: ["No recorded evidence exists for this problem yet."],
+					recentRuns: [],
+				} satisfies BalloonSlopCodeProblemEvidenceSummary)
+			const sessionSelection = selectSlopCodeProblemSession(store, problem.problemName, problem.recommendedSessionId, evidenceSummaryForProblem)
+			const sessionTurns = sessionSelection.hasStoredTurns ? store.getTurns(sessionSelection.sessionId, 5000) : []
 			const warnings: string[] = []
 			let scoreResult: LongSessionBenchmarkScoreResult | null = null
 			if (sessionTurns.length === 0) {
-				warnings.push("No stored turns found for the recommended session yet.")
+				warnings.push("No stored turns found for this problem yet.")
 			} else {
-				scoreResult = buildLongSessionBenchmarkScoreResult(store, problem.recommendedSessionId, {
+				scoreResult = buildLongSessionBenchmarkScoreResult(store, sessionSelection.sessionId, {
 					semanticAdapterPath: options.semanticAdapterPath,
 					semanticTimeoutMs: options.semanticTimeoutMs,
 					semanticMaxNotes: options.semanticMaxNotes,
@@ -1118,32 +1140,26 @@ function buildSlopCodeStarterSuiteSummary(
 				})
 				if (!scoreResult) warnings.push("Stored session exists, but Balloon could not build a checkpointed score summary from it.")
 			}
+			if (sessionSelection.sessionSource === "evidence_recent") {
+				warnings.push(
+					`Using evidence-backed session ${sessionSelection.sessionId} instead of the default ${problem.recommendedSessionId} so batch-prefixed live reruns still score and export correctly.`,
+				)
+			}
+			if (!sessionSelection.hasStoredTurns && evidenceSummaryForProblem.totalRuns > 0) {
+				warnings.push(
+					`Evidence exists for ${problem.problemName}, but Balloon could not find stored turns for ${sessionSelection.availableSessionIds.join(", ")}.`,
+				)
+			}
 			return {
 				problemName: problem.problemName,
-				sessionId: problem.recommendedSessionId,
+				sessionId: sessionSelection.sessionId,
+				recommendedSessionId: problem.recommendedSessionId,
+				sessionSource: sessionSelection.sessionSource,
 				recommendedCheckpoints: [...problem.recommendedCheckpointBatch],
 				sessionPresent: sessionTurns.length > 0,
 				executedCheckpoints: scoreResult ? scoreResult.executedCheckpoints.map((checkpoint) => checkpoint.actualTurnCount) : [],
 				scoreResult,
-				evidenceSummary:
-					evidenceByProblem.get(problem.problemName) ??
-					({
-						problemName: problem.problemName,
-						totalRuns: 0,
-						liveRuns: 0,
-						manualReplayRuns: 0,
-						fixtureRuns: 0,
-						syntheticDemoRuns: 0,
-						coverage: "not_run",
-						latestEvidenceKind: null,
-						latestHost: null,
-						latestProvider: null,
-						latestModel: null,
-						latestSessionId: null,
-						latestRecordedAt: null,
-						notes: ["No recorded evidence exists for this problem yet."],
-						recentRuns: [],
-					} satisfies BalloonSlopCodeProblemEvidenceSummary),
+				evidenceSummary: evidenceSummaryForProblem,
 				warnings,
 			}
 		})
@@ -1245,6 +1261,8 @@ function formatSlopCodeStarterSuiteSummary(summary: SlopCodeStarterSuiteSummary)
 		...summary.problems.flatMap((problem, index) => [
 			`${index + 1}. ${problem.problemName}`,
 			`Session id: ${problem.sessionId}`,
+			`Recommended session id: ${problem.recommendedSessionId}`,
+			`Session source: ${problem.sessionSource}`,
 			`Session present: ${problem.sessionPresent ? "yes" : "no"}`,
 			`Recommended checkpoints: ${problem.recommendedCheckpoints.join(", ")}`,
 			`Executed checkpoints: ${problem.executedCheckpoints.length > 0 ? problem.executedCheckpoints.join(", ") : "none"}`,
@@ -1380,6 +1398,57 @@ function buildSlopCodeEvidenceSummary(store: BalloonStateStore, problemNames?: s
 	}
 }
 
+function defaultTranscriptSourceForEvidenceKind(evidenceKind: BalloonSlopCodeEvidenceKind): BalloonSlopCodeTranscriptSource {
+	switch (evidenceKind) {
+		case "manual_replay":
+			return "pasted_turns"
+		case "fixture":
+			return "fixture_turns"
+		case "synthetic_demo":
+			return "generated_demo"
+		case "live_llm":
+		default:
+			return "live_host_session"
+	}
+}
+
+function candidateSlopCodeSessionIds(_problemName: string, recommendedSessionId: string, evidenceSummary?: BalloonSlopCodeProblemEvidenceSummary | null): string[] {
+	return uniqueStrings([
+		...(evidenceSummary?.recentRuns?.map((run) => run.sessionId) ?? []),
+		evidenceSummary?.latestSessionId ?? "",
+		recommendedSessionId,
+	]).filter((sessionId) => sessionId.length > 0)
+}
+
+function selectSlopCodeProblemSession(
+	store: BalloonStateStore,
+	problemName: string,
+	recommendedSessionId: string,
+	evidenceSummary?: BalloonSlopCodeProblemEvidenceSummary | null,
+): {
+	sessionId: string
+	sessionSource: "recommended" | "evidence_recent" | "none"
+	availableSessionIds: string[]
+	hasStoredTurns: boolean
+} {
+	const availableSessionIds = candidateSlopCodeSessionIds(problemName, recommendedSessionId, evidenceSummary)
+	for (const sessionId of availableSessionIds) {
+		if (store.getTurns(sessionId, 1).length === 0) continue
+		return {
+			sessionId,
+			sessionSource: sessionId === recommendedSessionId ? "recommended" : "evidence_recent",
+			availableSessionIds,
+			hasStoredTurns: true,
+		}
+	}
+	return {
+		sessionId: recommendedSessionId,
+		sessionSource: "none",
+		availableSessionIds,
+		hasStoredTurns: false,
+	}
+}
+
 function formatSlopCodeEvidenceSummary(summary: BalloonSlopCodeEvidenceSummary): string {
 	return [
 		summary.suiteName,
@@ -1435,18 +1504,14 @@ function buildSlopCodeLiveRunPacket(options: {
 		warnings.push(`${hostSurface.displayName} is currently ${hostSurface.status}, so repeat the live rerun carefully and keep the host evidence notes explicit.`)
 	}
 
-	const recordEvidenceArgs: Record<string, unknown> = {
+	const finalizeArgs: Record<string, unknown> = {
 		problemName,
 		sessionId,
-		evidenceKind: "live_llm",
-		transcriptSource: "live_host_session",
 		host,
-		checkpointMode: preparation.recommendedCheckpointMode,
-		checkpoints: preparation.entry.recommendedCheckpointBatch,
 	}
-	if (provider) recordEvidenceArgs.provider = provider
-	if (model) recordEvidenceArgs.model = model
-	if (datasetRoot) recordEvidenceArgs.datasetRoot = datasetRoot
+	if (provider) finalizeArgs.provider = provider
+	if (model) finalizeArgs.model = model
+	if (datasetRoot) finalizeArgs.datasetRoot = datasetRoot
 
 	return {
 		problemName,
@@ -1530,45 +1595,14 @@ function buildSlopCodeLiveRunPacket(options: {
 				],
 			},
 			{
-				stepId: "score",
-				title: "Score the checkpoint batch",
-				goal: "Run the standard Balloon scoring path across the opening, middle, and late checkpoints.",
-				toolName: "balloon_score_long_session_benchmark",
-				toolArgs: {
-					sessionId,
-					checkpoints: preparation.entry.recommendedCheckpointBatch,
-					checkpointMode: preparation.recommendedCheckpointMode,
-					semanticAdapterPath: "./examples/semantic_cara_adapter.example.mjs",
-					forceStageCount: preparation.entry.recommendedForceStageCount,
-					stageThresholds: preparation.entry.recommendedLongSessionThresholds,
-				},
+				stepId: "finalize_run",
+				title: "Finalize the live rerun",
+				goal: "Score the checkpoint batch, record evidence, and export the benchmark bundle in one tool call.",
+				toolName: "balloon_finalize_slopcode_live_run",
+				toolArgs: finalizeArgs,
 				notes: [
-					"For SCBench starter runs, the checkpoint numbers are assistant-turn ordinals.",
-				],
-			},
-			{
-				stepId: "record_evidence",
-				title: "Record live evidence",
-				goal: "Mark the rerun as truly live with host/model metadata instead of leaving it as an implicit chat memory.",
-				toolName: "balloon_record_slopcode_run_evidence",
-				toolArgs: recordEvidenceArgs,
-				notes: [
-					"If the session was not truly live, change evidenceKind before recording it.",
-				],
-			},
-			{
-				stepId: "export_artifacts",
-				title: "Export the benchmark bundle",
-				goal: "Write JSON and Markdown artifacts that carry score, pressure, and evidence coverage together.",
-				toolName: "balloon_export_slopcode_starter_artifacts",
-				toolArgs: {
-					problemNames: [problemName],
-					semanticAdapterPath: "./examples/semantic_cara_adapter.example.mjs",
-					forceStageCount: preparation.entry.recommendedForceStageCount,
-					stageThresholds: preparation.entry.recommendedLongSessionThresholds,
-				},
-				notes: [
-					"The export bundle should now show whether the rerun is truly live or still replay/demo only.",
+					"For SCBench starter runs, the checkpoint numbers are assistant-turn ordinals and Balloon will use the recommended batch automatically.",
+					"If the session was not truly live, change evidenceKind and transcriptSource before finalizing it.",
 				],
 			},
 		],
@@ -1663,8 +1697,8 @@ function buildSlopCodeLiveRunBatchPacket(options: {
 		warnings: uniqueStrings(warnings),
 		nextActions: [
 			`Run the batch in ${hostSurface.displayName} one problem at a time using the generated session ids.`,
-			"Record each rerun with balloon_record_slopcode_run_evidence immediately after scoring.",
-			"Export the starter-suite artifacts after the batch so the evidence coverage and pressure traces land in one bundle.",
+			"Finalize each rerun with balloon_finalize_slopcode_live_run so scoring, evidence recording, and artifact export stay aligned.",
+			"After the batch, use balloon_export_slopcode_starter_artifacts again if you want a fresh whole-suite bundle in one directory.",
 		],
 		packets,
 	}
@@ -1699,6 +1733,180 @@ function formatSlopCodeLiveRunBatchPacket(batch: BalloonSlopCodeLiveRunBatchPack
 	].join("\n")
 }
 
+function buildSlopCodeLiveRunFinalization(
+	store: BalloonStateStore,
+	options: BenchmarkLaneOptions & {
+		problemName?: unknown
+		sessionId?: unknown
+		turns?: unknown
+		mergeMode?: unknown
+		host?: unknown
+		provider?: unknown
+		model?: unknown
+		datasetRoot?: unknown
+		datasetVerificationStatus?: unknown
+		evidenceKind?: unknown
+		transcriptSource?: unknown
+		notes?: unknown
+		outputDir?: unknown
+	},
+): BalloonSlopCodeLiveRunFinalization | null {
+	const problemName = asString(options.problemName)
+	if (!problemName) return null
+	const datasetRoot = asString(options.datasetRoot)
+	const preparation = buildSlopCodeProblemPreparation(problemName, datasetRoot ?? undefined)
+	if (!preparation) return null
+
+	const sessionId = asString(options.sessionId) ?? preparation.recommendedSessionId
+	const turns = asTurns(options.turns)
+	const mergeMode = asString(options.mergeMode) === "append" ? "append" : "replace"
+	const evidenceKind = parseSlopCodeEvidenceKind(options.evidenceKind) ?? "live_llm"
+	const transcriptSource = parseSlopCodeTranscriptSource(options.transcriptSource) ?? defaultTranscriptSourceForEvidenceKind(evidenceKind)
+	const host = asString(options.host) ? parseHostKind(options.host) : null
+	const provider = asString(options.provider)
+	const model = asString(options.model)
+	const explicitDatasetVerificationStatus = parseSlopCodeDatasetVerificationStatus(options.datasetVerificationStatus)
+	const datasetStatus = datasetRoot ? getSlopCodeDatasetStatus(datasetRoot) : preparation.datasetStatus
+	const warnings: string[] = []
+
+	if (turns.length === 0 && store.getTurns(sessionId, 1).length === 0) return null
+	if (turns.length === 0) warnings.push("No new turns were provided, so Balloon finalized the currently stored session transcript.")
+	if (mergeMode === "append" && turns.length > 0) warnings.push("Incoming turns were appended before scoring, so confirm the transcript stays in the intended checkpoint order.")
+	if (sessionId !== preparation.recommendedSessionId) {
+		warnings.push(
+			`Using custom session id ${sessionId} instead of the default ${preparation.recommendedSessionId}. Balloon will follow recorded evidence so starter-suite exports stay aligned.`,
+		)
+	}
+	if (datasetStatus.verificationStatus !== "verified") {
+		warnings.push(`Dataset verification is ${datasetStatus.verificationStatus}, so this rerun should stay provisional until the dataset root is fully verified.`)
+	}
+	if (evidenceKind === "live_llm" && transcriptSource !== "live_host_session") {
+		warnings.push("This run is marked live_llm but the transcript source is not live_host_session. Only keep that if you are explicitly backfilling a true live run.")
+	}
+	if (evidenceKind !== "live_llm" && transcriptSource === "live_host_session") {
+		warnings.push("This run uses a live_host_session transcript source but is not marked live_llm. Double-check whether the evidence kind should stay non-live.")
+	}
+
+	const scoreResult = buildLongSessionBenchmarkScoreResult(store, sessionId, {
+		turns,
+		mergeMode,
+		checkpoints: preparation.entry.recommendedCheckpointBatch,
+		checkpointMode: preparation.recommendedCheckpointMode,
+		semanticAdapterPath: options.semanticAdapterPath,
+		semanticTimeoutMs: options.semanticTimeoutMs,
+		semanticMaxNotes: options.semanticMaxNotes,
+		forceStageCount: preparation.entry.recommendedForceStageCount,
+		stageThresholds: preparation.entry.recommendedLongSessionThresholds,
+	})
+	if (!scoreResult) return null
+
+	const recordedAt = new Date().toISOString()
+	const evidence: BalloonSlopCodeRunEvidence = {
+		runId: `slopcode-evidence-${crypto.randomUUID()}`,
+		problemName,
+		sessionId,
+		evidenceKind,
+		transcriptSource,
+		host,
+		provider,
+		model,
+		datasetRoot: datasetRoot ? toPortablePath(path.resolve(process.cwd(), datasetRoot)) : null,
+		datasetVerificationStatus: datasetRoot ? datasetStatus.verificationStatus : explicitDatasetVerificationStatus ?? null,
+		checkpointMode: preparation.recommendedCheckpointMode,
+		checkpoints: [...preparation.entry.recommendedCheckpointBatch],
+		notes: asStringArray(options.notes),
+		recordedAt,
+	}
+	store.saveSlopCodeRunEvidence(evidence)
+
+	const artifactBundle = buildStarterSuiteArtifactExport(store, {
+		datasetRoot,
+		problemNames: [problemName],
+		outputDir: asString(options.outputDir),
+		semanticAdapterPath: options.semanticAdapterPath,
+		semanticTimeoutMs: options.semanticTimeoutMs,
+		semanticMaxNotes: options.semanticMaxNotes,
+		forceStageCount: preparation.entry.recommendedForceStageCount,
+		stageThresholds: preparation.entry.recommendedLongSessionThresholds,
+	})
+	if (!artifactBundle) return null
+
+	const problemArtifact = artifactBundle.problems.find((problem) => problem.problemName === problemName) ?? null
+	const artifacts: BalloonSlopCodeLiveRunFinalizationArtifacts = {
+		outputDir: artifactBundle.outputDir,
+		summaryJsonPath: artifactBundle.summaryJsonPath,
+		summaryMarkdownPath: artifactBundle.summaryMarkdownPath,
+		problemJsonPath: problemArtifact?.jsonPath ?? null,
+		problemMarkdownPath: problemArtifact?.markdownPath ?? null,
+		evidenceCoverage: problemArtifact?.evidenceSummary.coverage ?? "not_run",
+		topLanes: problemArtifact?.topLanes ?? [],
+		evidenceAlerts: problemArtifact?.evidenceAlerts ?? [],
+		pressureAlerts: problemArtifact?.pressureAlerts ?? [],
+	}
+
+	return {
+		problemName,
+		sessionId,
+		recommendedSessionId: preparation.recommendedSessionId,
+		sessionSource: sessionId === preparation.recommendedSessionId ? "recommended" : "evidence_recent",
+		host,
+		provider,
+		model,
+		mergeMode,
+		turnsMerged: turns.length,
+		totalTurnCount: store.getTurns(sessionId, 5000).length,
+		datasetStatus,
+		scoreResult,
+		evidence,
+		artifacts,
+		warnings: uniqueStrings([...warnings, ...artifacts.evidenceAlerts, ...artifacts.pressureAlerts]),
+		nextActions: [
+			"Inspect the exported Markdown artifact before making any public benchmark claim.",
+			"Keep the same session id for reruns of the same problem so Balloon can compare pressure traces cleanly.",
+			"After multiple problems are finalized, export the full starter suite again to refresh the shared summary bundle.",
+		],
+	}
+}
+
+function formatSlopCodeLiveRunFinalization(result: BalloonSlopCodeLiveRunFinalization): string {
+	return [
+		`Problem: ${result.problemName}`,
+		`Session id: ${result.sessionId}`,
+		`Recommended session id: ${result.recommendedSessionId}`,
+		`Session source: ${result.sessionSource}`,
+		`Merge mode: ${result.mergeMode}`,
+		`Turns merged: ${result.turnsMerged}`,
+		`Total turns: ${result.totalTurnCount}`,
+		`Host: ${result.host ?? "unspecified"}`,
+		`Provider: ${result.provider ?? "unspecified"}`,
+		`Model: ${result.model ?? "unspecified"}`,
+		"",
+		"Dataset status",
+		formatSlopCodeDatasetStatus(result.datasetStatus),
+		"",
+		"Evidence",
+		formatSlopCodeRunEvidence(result.evidence),
+		"",
+		"Artifacts",
+		`Output directory: ${result.artifacts.outputDir}`,
+		`Summary JSON: ${result.artifacts.summaryJsonPath}`,
+		`Summary Markdown: ${result.artifacts.summaryMarkdownPath}`,
+		`Problem JSON: ${result.artifacts.problemJsonPath ?? "none"}`,
+		`Problem Markdown: ${result.artifacts.problemMarkdownPath ?? "none"}`,
+		`Evidence coverage: ${result.artifacts.evidenceCoverage}`,
+		`Top lane(s): ${result.artifacts.topLanes.join(", ") || "none"}`,
+		"",
+		"Warnings",
+		...(result.warnings.length > 0 ? result.warnings.map((warning, index) => `${index + 1}. ${warning}`) : ["None recorded."]),
+		"",
+		"Next actions",
+		...result.nextActions.map((action, index) => `${index + 1}. ${action}`),
+		"",
+		"Score summary",
+		formatLongSessionBenchmarkScoreResult(result.scoreResult),
+	].join("\n")
+}
+
 function buildSlopCodeLiveRunPlaybook(): JsonRecord {
 	const starterSuite = buildSlopCodeStarterSuite()
 	return {
@@ -1706,9 +1914,9 @@ function buildSlopCodeLiveRunPlaybook(): JsonRecord {
 		summary: "Use this playbook when you want true live SCBench evidence instead of replay-only or synthetic benchmark traces.",
 		requiredTools: [
 			"balloon_prepare_slopcode_live_run_packet",
-			"balloon_prepare_slopcode_problem",
-			"balloon_score_long_session_benchmark",
-			"balloon_record_slopcode_run_evidence",
+			"balloon_prepare_slopcode_live_run_batch",
+			"balloon_finalize_slopcode_live_run",
+			"balloon_summarize_slopcode_run_evidence",
 			"balloon_export_slopcode_starter_artifacts",
 		],
 		resourcePointers: [
@@ -1735,6 +1943,7 @@ function buildSlopCodeLiveRunPlaybook(): JsonRecord {
 			"Do not call a run live_llm unless it came from a real host-connected model session.",
 			"Use manual_replay, fixture, or synthetic_demo when the turns were reconstructed or generated.",
 			"Keep the exported bundle and evidence ledger aligned before making public benchmark claims.",
+			"Prefer balloon_finalize_slopcode_live_run after each real rerun so score, evidence, and artifacts stay tied to the same session.",
 		],
 	} satisfies JsonRecord
 }
@@ -2503,6 +2712,7 @@ const BENCHMARK_SURFACE_TOOL_NAMES = [
 	"balloon_plan_slopcode_starter_benchmark",
 	"balloon_prepare_slopcode_live_run_packet",
 	"balloon_prepare_slopcode_live_run_batch",
+	"balloon_finalize_slopcode_live_run",
 	"balloon_record_slopcode_run_evidence",
 	"balloon_summarize_slopcode_run_evidence",
 	"balloon_summarize_slopcode_starter_suite",
@@ -4776,6 +4986,89 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					model: args.model,
 				})
 				return textResult(formatSlopCodeLiveRunBatchPacket(batch), batch as unknown as JsonRecord)
+			},
+		},
+		{
+			name: "balloon_finalize_slopcode_live_run",
+			title: "Finalize SlopCodeBench Live Run",
+			description:
+				"Stores or merges the transcript for one starter-suite SCBench run, scores the recommended checkpoint batch, records evidence, and exports the per-problem artifact bundle in one step.",
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["problemName"],
+				properties: {
+					problemName: { type: "string", description: "Starter-suite problem name such as file_backup, execution_server, or trajectory_api." },
+					sessionId: { type: "string", description: "Optional session id. Defaults to the problem's recommended session id." },
+					turns: {
+						type: "array",
+						description: "Optional transcript turns to replace or append before scoring.",
+						items: {
+							type: "object",
+							properties: {
+								role: { type: "string", enum: ["user", "assistant", "system"] },
+								content: { type: "string" },
+								timestamp: { type: "string" },
+							},
+							required: ["role", "content"],
+						},
+					},
+					mergeMode: { type: "string", enum: ["replace", "append"], description: "Whether provided turns replace or append to the stored session." },
+					host: {
+						type: "string",
+						enum: ["vscode", "cline", "roo_code", "claude_desktop", "generic_json"],
+						description: "Optional host used for the run when applicable.",
+					},
+					provider: { type: "string", description: "Optional model provider observed during the run." },
+					model: { type: "string", description: "Optional model name observed during the run." },
+					evidenceKind: {
+						type: "string",
+						enum: ["live_llm", "manual_replay", "fixture", "synthetic_demo"],
+						description: "How Balloon should classify the benchmark evidence. Defaults to live_llm.",
+					},
+					transcriptSource: {
+						type: "string",
+						enum: ["live_host_session", "pasted_turns", "fixture_turns", "generated_demo"],
+						description: "How the transcript was captured. Defaults from evidenceKind.",
+					},
+					datasetRoot: { type: "string", description: "Optional local SlopCodeBench dataset root used for the run." },
+					datasetVerificationStatus: {
+						type: "string",
+						enum: ["verified", "partial", "missing"],
+						description: "Optional explicit dataset verification status when backfilling evidence without a local dataset root.",
+					},
+					notes: { type: "array", description: "Optional notes and claim-boundary caveats stored with the evidence record.", items: { type: "string" } },
+					outputDir: { type: "string", description: "Optional output directory for the exported artifact bundle." },
+					semanticAdapterPath: { type: "string", description: "Optional semantic adapter path for the assist lane." },
+					semanticTimeoutMs: { type: "number", description: "Optional semantic adapter timeout in milliseconds." },
+					semanticMaxNotes: { type: "number", description: "Optional cap on semantic notes returned." },
+				},
+			},
+			run: (args, context) => {
+				const result = buildSlopCodeLiveRunFinalization(context.store, {
+					problemName: args.problemName,
+					sessionId: args.sessionId,
+					turns: args.turns,
+					mergeMode: args.mergeMode,
+					host: args.host,
+					provider: args.provider,
+					model: args.model,
+					evidenceKind: args.evidenceKind,
+					transcriptSource: args.transcriptSource,
+					datasetRoot: args.datasetRoot,
+					datasetVerificationStatus: args.datasetVerificationStatus,
+					notes: args.notes,
+					outputDir: args.outputDir,
+					semanticAdapterPath: args.semanticAdapterPath,
+					semanticTimeoutMs: args.semanticTimeoutMs,
+					semanticMaxNotes: args.semanticMaxNotes,
+				})
+				if (!result) {
+					return toolError(
+						`Balloon could not finalize the SCBench run. Confirm problemName is valid and either provide turns or reuse a session that already has stored transcript turns.`,
+					)
+				}
+				return textResult(formatSlopCodeLiveRunFinalization(result), result as unknown as JsonRecord)
 			},
 		},
 		{

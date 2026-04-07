@@ -40,6 +40,7 @@ type SmokeResult = {
 	slopcodeProblemPrepWorked: boolean
 	slopcodeLiveRunPacketWorked: boolean
 	slopcodeLiveRunBatchWorked: boolean
+	slopcodeLiveRunFinalizeWorked: boolean
 	slopcodeEvidenceRecordWorked: boolean
 	slopcodeEvidenceSummaryWorked: boolean
 	reviewDriftFallbackWorked: boolean
@@ -271,6 +272,7 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			hasTool(toolsList, "balloon_prepare_slopcode_problem") &&
 			hasTool(toolsList, "balloon_prepare_slopcode_live_run_packet") &&
 			hasTool(toolsList, "balloon_prepare_slopcode_live_run_batch") &&
+			hasTool(toolsList, "balloon_finalize_slopcode_live_run") &&
 			hasTool(toolsList, "balloon_record_slopcode_run_evidence") &&
 			hasTool(toolsList, "balloon_summarize_slopcode_run_evidence") &&
 			hasTool(toolsList, "balloon_review_session_drift")
@@ -981,7 +983,7 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			slopcodeLiveRunPacket.structuredContent?.evidenceTarget?.transcriptSource === "live_host_session" &&
 			(slopcodeLiveRunPacket.structuredContent?.evidenceTarget?.checkpoints?.length ?? 0) >= 3 &&
 			(slopcodeLiveRunPacket.structuredContent?.steps?.some(
-				(step) => step.stepId === "record_evidence" && step.toolName === "balloon_record_slopcode_run_evidence",
+				(step) => step.stepId === "finalize_run" && step.toolName === "balloon_finalize_slopcode_live_run",
 			) ??
 				false)
 		details.push(`slopcodeLiveRunPacketWorked=${slopcodeLiveRunPacketWorked ? "yes" : "no"}`)
@@ -1015,6 +1017,89 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			) ??
 				false)
 		details.push(`slopcodeLiveRunBatchWorked=${slopcodeLiveRunBatchWorked ? "yes" : "no"}`)
+
+		const slopcodeFinalizeOutputDir = path.join(dataDir, "slopcode-finalize-execution-server")
+		const finalizedSlopCodeRun = (await client.request("tools/call", {
+			name: "balloon_finalize_slopcode_live_run",
+			arguments: {
+				problemName: "execution_server",
+				sessionId: "scbench-cline-live-execution-server",
+				host: "cline",
+				provider: "openai",
+				model: "gpt-5.4",
+				evidenceKind: "manual_replay",
+				transcriptSource: "pasted_turns",
+				outputDir: slopcodeFinalizeOutputDir,
+				turns: [
+					{
+						role: "user",
+						content: "Checkpoint 1: extend the execution server with bounded timeout controls. Keep the server shape stable, preserve tests, and do not rewrite the scheduler.",
+					},
+					{
+						role: "assistant",
+						content: "I would keep the existing execution-server architecture stable, add bounded timeout controls directly, and preserve tests instead of rewriting the scheduler.",
+					},
+					{
+						role: "user",
+						content: "Checkpoint 2: add cached execution metadata and keep concurrency behavior explicit.",
+					},
+					{
+						role: "assistant",
+						content: "I would keep the same server boundaries, add cached execution metadata, preserve concurrency behavior, and keep verification explicit.",
+					},
+					{
+						role: "user",
+						content: "Checkpoint 3: support retry-safe queue inspection without broad refactors.",
+					},
+					{
+						role: "assistant",
+						content: "I would keep the current server boundaries, add retry-safe queue inspection directly, avoid broad refactors, and preserve tests and concurrency notes.",
+					},
+					{
+						role: "user",
+						content: "Checkpoint 4: keep the smallest safe next step and preserve verification carry-forward.",
+					},
+					{
+						role: "assistant",
+						content: "I would keep the smallest safe bounded next step for the execution server, preserve tests, preserve concurrency notes, and avoid broad rewrites.",
+					},
+				],
+				notes: ["Smoke verification finalizes a non-live replay only. Do not treat this as real benchmark proof."],
+			},
+		})) as {
+			structuredContent?: {
+				problemName?: string
+				sessionId?: string
+				recommendedSessionId?: string
+				sessionSource?: string
+				evidence?: { evidenceKind?: string; transcriptSource?: string }
+				artifacts?: {
+					outputDir?: string
+					problemJsonPath?: string | null
+					problemMarkdownPath?: string | null
+					evidenceCoverage?: string
+				}
+				scoreResult?: { executedCheckpoints?: Array<{ actualTurnCount?: number }>; topLanes?: string[] }
+			}
+		}
+		const finalizedProblemJsonPath = finalizedSlopCodeRun.structuredContent?.artifacts?.problemJsonPath
+		const finalizedProblemMarkdownPath = finalizedSlopCodeRun.structuredContent?.artifacts?.problemMarkdownPath
+		const slopcodeLiveRunFinalizeWorked =
+			finalizedSlopCodeRun.structuredContent?.problemName === "execution_server" &&
+			finalizedSlopCodeRun.structuredContent?.sessionId === "scbench-cline-live-execution-server" &&
+			finalizedSlopCodeRun.structuredContent?.recommendedSessionId === "scbench-execution-server" &&
+			finalizedSlopCodeRun.structuredContent?.sessionSource === "evidence_recent" &&
+			finalizedSlopCodeRun.structuredContent?.evidence?.evidenceKind === "manual_replay" &&
+			finalizedSlopCodeRun.structuredContent?.evidence?.transcriptSource === "pasted_turns" &&
+			finalizedSlopCodeRun.structuredContent?.artifacts?.outputDir === slopcodeFinalizeOutputDir &&
+			finalizedSlopCodeRun.structuredContent?.artifacts?.evidenceCoverage === "non_live_only" &&
+			(finalizedSlopCodeRun.structuredContent?.scoreResult?.executedCheckpoints?.length ?? 0) >= 1 &&
+			(finalizedSlopCodeRun.structuredContent?.scoreResult?.topLanes?.length ?? 0) >= 1 &&
+			typeof finalizedProblemJsonPath === "string" &&
+			typeof finalizedProblemMarkdownPath === "string" &&
+			fs.existsSync(finalizedProblemJsonPath) &&
+			fs.existsSync(finalizedProblemMarkdownPath)
+		details.push(`slopcodeLiveRunFinalizeWorked=${slopcodeLiveRunFinalizeWorked ? "yes" : "no"}`)
 
 		const slopcodeEvidenceSummary = (await client.request("tools/call", {
 			name: "balloon_summarize_slopcode_run_evidence",
@@ -1204,6 +1289,7 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			Boolean(starterRunbookResource?.contents?.[0]?.text?.includes("\"executionOrder\"")) &&
 			Boolean(slopcodeLiveRunPlaybookResource?.contents?.[0]?.text?.includes("\"Balloon SlopCodeBench Live Run Playbook\"")) &&
 			Boolean(slopcodeLiveRunPlaybookResource?.contents?.[0]?.text?.includes("\"balloon_prepare_slopcode_live_run_packet\"")) &&
+			Boolean(slopcodeLiveRunPlaybookResource?.contents?.[0]?.text?.includes("\"balloon_finalize_slopcode_live_run\"")) &&
 			Boolean(slopcodeLiveRunBatchResource?.contents?.[0]?.text?.includes("\"totalProblems\": 3")) &&
 			Boolean(slopcodeLiveRunBatchResource?.contents?.[0]?.text?.includes("\"file_backup\"")) &&
 			Boolean(slopcodeEvidenceResource?.contents?.[0]?.text?.includes("\"suiteName\": \"Balloon SlopCodeBench Evidence\"")) &&
@@ -1238,6 +1324,7 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			slopcodeProblemPrepWorked,
 			slopcodeLiveRunPacketWorked,
 			slopcodeLiveRunBatchWorked,
+			slopcodeLiveRunFinalizeWorked,
 			slopcodeEvidenceRecordWorked,
 			slopcodeEvidenceSummaryWorked,
 			reviewDriftFallbackWorked,
@@ -1283,6 +1370,7 @@ export function formatBalloonMcpSmoke(result: SmokeResult): string {
 		`SCBench problem preparation: ${result.slopcodeProblemPrepWorked ? "PASS" : "FAIL"}`,
 		`SCBench live-run packet: ${result.slopcodeLiveRunPacketWorked ? "PASS" : "FAIL"}`,
 		`SCBench live-run batch: ${result.slopcodeLiveRunBatchWorked ? "PASS" : "FAIL"}`,
+		`SCBench live-run finalize: ${result.slopcodeLiveRunFinalizeWorked ? "PASS" : "FAIL"}`,
 		`SCBench evidence record: ${result.slopcodeEvidenceRecordWorked ? "PASS" : "FAIL"}`,
 		`SCBench evidence summary: ${result.slopcodeEvidenceSummaryWorked ? "PASS" : "FAIL"}`,
 		`Review drift fallback: ${result.reviewDriftFallbackWorked ? "PASS" : "FAIL"}`,
@@ -1326,6 +1414,7 @@ async function main(): Promise<void> {
 			result.slopcodeProblemPrepWorked &&
 			result.slopcodeLiveRunPacketWorked &&
 			result.slopcodeLiveRunBatchWorked &&
+			result.slopcodeLiveRunFinalizeWorked &&
 			result.slopcodeEvidenceRecordWorked &&
 			result.slopcodeEvidenceSummaryWorked &&
 			result.reviewDriftFallbackWorked &&

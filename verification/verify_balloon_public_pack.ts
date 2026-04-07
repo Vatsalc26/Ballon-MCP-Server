@@ -156,6 +156,8 @@ export async function runBalloonPublicPackHarness(rootDir = resolveRootDir()): P
 		"docs/CLINE_QUICKSTART.md",
 		"docs/ROO_CODE_QUICKSTART.md",
 		"docs/READINESS.md",
+		"docs/LONG_SESSION_BENCHMARK.md",
+		"docs/SLOPCODEBENCH_STARTER_SUITE.md",
 		"examples/vscode_mcp.example.json",
 		"examples/cline_mcp_settings.example.json",
 		"examples/roo_mcp.example.json",
@@ -169,6 +171,7 @@ export async function runBalloonPublicPackHarness(rootDir = resolveRootDir()): P
 		"examples/host_validation_summary_request.example.json",
 		"examples/slopcode_live_run_packet_request.example.json",
 		"examples/slopcode_live_run_batch_request.example.json",
+		"examples/slopcode_live_run_finalize_request.example.json",
 		"examples/slopcode_run_evidence_request.example.json",
 		"examples/slopcode_run_evidence_summary_request.example.json",
 	]
@@ -190,6 +193,8 @@ export async function runBalloonPublicPackHarness(rootDir = resolveRootDir()): P
 	const installText = readText(path.join(publicPackDir, "docs", "INSTALL.md"))
 	const hostCompatibilityText = readText(path.join(publicPackDir, "docs", "HOST_COMPATIBILITY.md"))
 	const hostValidationText = readText(path.join(publicPackDir, "docs", "HOST_VALIDATION.md"))
+	const longSessionText = readText(path.join(publicPackDir, "docs", "LONG_SESSION_BENCHMARK.md"))
+	const starterSuiteText = readText(path.join(publicPackDir, "docs", "SLOPCODEBENCH_STARTER_SUITE.md"))
 	const hostGuidanceAligned =
 		includesAll(readmeText, [
 			"`balloon_prepare_host_setup_packet`",
@@ -200,6 +205,7 @@ export async function runBalloonPublicPackHarness(rootDir = resolveRootDir()): P
 			"`balloon_record_host_validation_result`",
 			"`balloon_summarize_host_validation_results`",
 			"`balloon://hosts/matrix`",
+			"`balloon_finalize_slopcode_live_run`",
 		]) &&
 		includesAll(installText, [
 			"`balloon_prepare_host_setup_packet`",
@@ -233,6 +239,20 @@ export async function runBalloonPublicPackHarness(rootDir = resolveRootDir()): P
 			"`balloon://hosts/{host}/playbook`",
 			"`balloon://hosts/{host}/validation-suite`",
 			"`balloon://hosts/{host}/validation-evidence`",
+		]) &&
+		includesAll(longSessionText, [
+			"`balloon_prepare_slopcode_live_run_packet`",
+			"`balloon_prepare_slopcode_live_run_batch`",
+			"`balloon_finalize_slopcode_live_run`",
+			"`balloon_summarize_slopcode_run_evidence`",
+			"`balloon_export_slopcode_starter_artifacts`",
+		]) &&
+		includesAll(starterSuiteText, [
+			"`balloon_prepare_slopcode_live_run_packet`",
+			"`balloon_prepare_slopcode_live_run_batch`",
+			"`balloon_finalize_slopcode_live_run`",
+			"`balloon_summarize_slopcode_run_evidence`",
+			"`balloon_export_slopcode_starter_artifacts`",
 		])
 
 	const placeholderChecks = [
@@ -287,6 +307,10 @@ export async function runBalloonPublicPackHarness(rootDir = resolveRootDir()): P
 		{
 			relativePath: "examples/slopcode_live_run_batch_request.example.json",
 			requiredSnippets: ["REPLACE_WITH_YOUR_BATCH_PREFIX", "REPLACE_WITH_YOUR_SLOPCODEBENCH_ROOT"],
+		},
+		{
+			relativePath: "examples/slopcode_live_run_finalize_request.example.json",
+			requiredSnippets: ["REPLACE_WITH_YOUR_SESSION_ID", "REPLACE_WITH_REAL_LIVE_OR_REPLAY_TURN_1"],
 		},
 		{
 			relativePath: "examples/vscode_mcp.example.json",
