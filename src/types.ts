@@ -447,6 +447,34 @@ export interface BalloonSlopCodeLiveRunPacket {
 	steps: BalloonSlopCodeLiveRunStep[]
 }
 
+export interface BalloonSlopCodeLiveRunFinalizePacket {
+	problemName: string
+	host: BalloonHostKind
+	hostDisplayName: string
+	sessionId: string
+	recommendedSessionId: string
+	provider: string | null
+	model: string | null
+	evidenceKind: BalloonSlopCodeEvidenceKind
+	transcriptSource: BalloonSlopCodeTranscriptSource
+	mergeMode: "replace" | "append"
+	datasetStatus: SlopCodeDatasetStatus
+	recommendedCheckpoints: number[]
+	checkpointCount: number
+	turnPlaceholders: Array<{
+		checkpoint: number
+		userContent: string
+		assistantContent: string
+	}>
+	request: {
+		tool: "balloon_finalize_slopcode_live_run"
+		arguments: Record<string, unknown>
+	}
+	copyPastePrompt: string
+	warnings: string[]
+	notes: string[]
+}
+
 export interface BalloonSlopCodeLiveRunBatchPacket {
 	host: BalloonHostKind
 	hostDisplayName: string

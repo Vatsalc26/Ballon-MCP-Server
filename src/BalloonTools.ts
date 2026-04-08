@@ -37,6 +37,7 @@ import type {
 	BalloonSlopCodeLiveRunBatchFinalization,
 	BalloonSlopCodeLiveRunFinalization,
 	BalloonSlopCodeLiveRunBatchPacket,
+	BalloonSlopCodeLiveRunFinalizePacket,
 	BalloonSlopCodeLiveRunFinalizationArtifacts,
 	BalloonSlopCodeLiveRunPacket,
 	BalloonSlopCodeProblemEvidenceSummary,
@@ -1644,6 +1645,113 @@ function formatSlopCodeLiveRunPacket(packet: BalloonSlopCodeLiveRunPacket): stri
 	].join("\n")
 }
 
+function buildSlopCodeLiveRunFinalizePacket(options: {
+	problemName?: unknown
+	host?: unknown
+	sessionId?: unknown
+	datasetRoot?: unknown
+	provider?: unknown
+	model?: unknown
+	evidenceKind?: unknown
+	transcriptSource?: unknown
+	mergeMode?: unknown
+}): BalloonSlopCodeLiveRunFinalizePacket | null {
+	const packet = buildSlopCodeLiveRunPacket(options)
+	if (!packet) return null
+	const evidenceKind = parseSlopCodeEvidenceKind(options.evidenceKind) ?? packet.evidenceTarget.evidenceKind
+	const transcriptSource = parseSlopCodeTranscriptSource(options.transcriptSource) ?? defaultTranscriptSourceForEvidenceKind(evidenceKind)
+	const mergeMode = asString(options.mergeMode) === "append" ? "append" : "replace"
+	const turnPlaceholders = Array.from({ length: packet.problemPreparation.entry.checkpointCount }, (_, index) => {
+		const checkpoint = index + 1
+		return {
+			checkpoint,
+			userContent: `PASTE_CHECKPOINT_${checkpoint}_PROMPT_EXACTLY`,
+			assistantContent: `PASTE_ASSISTANT_REPLY_${checkpoint}_EXACTLY`,
+		}
+	})
+	const requestArgs: Record<string, unknown> = {
+		problemName: packet.problemName,
+		sessionId: packet.sessionId,
+		host: packet.host,
+		evidenceKind,
+		transcriptSource,
+		mergeMode,
+		turns: turnPlaceholders.flatMap((placeholder) => [
+			{ role: "user", content: placeholder.userContent },
+			{ role: "assistant", content: placeholder.assistantContent },
+		]),
+	}
+	if (packet.provider) requestArgs.provider = packet.provider
+	if (packet.model) requestArgs.model = packet.model
+	if (packet.datasetStatus.datasetRoot) requestArgs.datasetRoot = packet.datasetStatus.datasetRoot
+
+	return {
+		problemName: packet.problemName,
+		host: packet.host,
+		hostDisplayName: packet.hostDisplayName,
+		sessionId: packet.sessionId,
+		recommendedSessionId: packet.problemPreparation.recommendedSessionId,
+		provider: packet.provider,
+		model: packet.model,
+		evidenceKind,
+		transcriptSource,
+		mergeMode,
+		datasetStatus: packet.datasetStatus,
+		recommendedCheckpoints: [...packet.evidenceTarget.checkpoints],
+		checkpointCount: packet.problemPreparation.entry.checkpointCount,
+		turnPlaceholders,
+		request: {
+			tool: "balloon_finalize_slopcode_live_run",
+			arguments: requestArgs,
+		},
+		copyPastePrompt: [
+			"Use #balloon_finalize_slopcode_live_run with the JSON below.",
+			"",
+			"Return text only.",
+			"Do not edit files.",
+			"Do not apply patches.",
+			"Do not run terminal commands.",
+		].join("\n"),
+		warnings: uniqueStrings([
+			...packet.warnings,
+			...(packet.provider ? [] : ["Provider is omitted, so Balloon will record the run without provider metadata unless you add it before finalizing."]),
+			...(packet.model ? [] : ["Model is omitted, so Balloon will record the run without model metadata unless you add it before finalizing."]),
+		]),
+		notes: [
+			"Paste every checkpoint user turn and assistant reply in order, even though Balloon only scores the recommended checkpoint batch.",
+			"If the exact host chat still exists, keep evidenceKind/live_host_session as generated here.",
+			"If you reconstructed the run later from copied text, change evidenceKind to manual_replay and transcriptSource to pasted_turns before running the finalizer.",
+		],
+	}
+}
+
+function formatSlopCodeLiveRunFinalizePacket(packet: BalloonSlopCodeLiveRunFinalizePacket): string {
+	return [
+		`Problem: ${packet.problemName}`,
+		`Host: ${packet.hostDisplayName} (${packet.host})`,
+		`Session id: ${packet.sessionId}`,
+		`Recommended session id: ${packet.recommendedSessionId}`,
+		`Evidence: ${packet.evidenceKind} via ${packet.transcriptSource}`,
+		`Merge mode: ${packet.mergeMode}`,
+		`Recommended scored checkpoints: ${packet.recommendedCheckpoints.join(", ")}`,
+		`Checkpoint count to paste: ${packet.checkpointCount}`,
+		"",
+		"Warnings",
+		...(packet.warnings.length > 0 ? packet.warnings.map((warning, index) => `${index + 1}. ${warning}`) : ["None recorded."]),
+		"",
+		"Notes",
+		...packet.notes.map((note, index) => `${index + 1}. ${note}`),
+		"",
+		"Copy/paste prompt",
+		packet.copyPastePrompt,
+		"",
+		"JSON",
+		"```json",
+		JSON.stringify(packet.request, null, 2),
+		"```",
+	].join("\n")
+}
+
 function buildSlopCodeLiveRunBatchPacket(options: {
 	host?: unknown
 	problemNames?: unknown
@@ -2093,6 +2201,7 @@ function buildSlopCodeLiveRunPlaybook(): JsonRecord {
 		summary: "Use this playbook when you want true live SCBench evidence instead of replay-only or synthetic benchmark traces.",
 		requiredTools: [
 			"balloon_prepare_slopcode_live_run_packet",
+			"balloon_prepare_slopcode_live_run_finalize_packet",
 			"balloon_prepare_slopcode_live_run_batch",
 			"balloon_finalize_slopcode_live_run",
 			"balloon_finalize_slopcode_live_run_batch",
@@ -2892,6 +3001,7 @@ const BENCHMARK_SURFACE_TOOL_NAMES = [
 	"balloon_describe_slopcode_starter_suite",
 	"balloon_plan_slopcode_starter_benchmark",
 	"balloon_prepare_slopcode_live_run_packet",
+	"balloon_prepare_slopcode_live_run_finalize_packet",
 	"balloon_prepare_slopcode_live_run_batch",
 	"balloon_finalize_slopcode_live_run",
 	"balloon_finalize_slopcode_live_run_batch",
@@ -5135,6 +5245,59 @@ export function buildBalloonToolDefinitions(): ToolDefinition[] {
 					)
 				}
 				return textResult(formatSlopCodeLiveRunPacket(packet), packet as unknown as JsonRecord)
+			},
+		},
+		{
+			name: "balloon_prepare_slopcode_live_run_finalize_packet",
+			title: "Prepare SlopCodeBench Live Run Finalize Packet",
+			description:
+				"Builds a ready-to-paste finalizer request for one starter-suite SCBench run so you can drop in the real transcript turns without hand-assembling the JSON shape.",
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+			inputSchema: {
+				type: "object",
+				required: ["problemName"],
+				properties: {
+					problemName: { type: "string", description: "Starter-suite problem name such as file_backup, execution_server, or trajectory_api." },
+					host: {
+						type: "string",
+						enum: ["vscode", "cline", "roo_code", "claude_desktop", "generic_json"],
+						description: "Target host used for the live rerun. Defaults to vscode.",
+					},
+					sessionId: { type: "string", description: "Optional stable session id for the live rerun. Defaults to the recommended live session id." },
+					datasetRoot: { type: "string", description: "Optional local SlopCodeBench dataset root used for the run." },
+					provider: { type: "string", description: "Optional provider observed during the run." },
+					model: { type: "string", description: "Optional model observed during the run." },
+					evidenceKind: {
+						type: "string",
+						enum: ["live_llm", "manual_replay", "fixture", "synthetic_demo"],
+						description: "Optional evidence kind. Defaults to live_llm.",
+					},
+					transcriptSource: {
+						type: "string",
+						enum: ["live_host_session", "pasted_turns", "fixture_turns", "generated_demo"],
+						description: "Optional transcript source. Defaults from evidenceKind.",
+					},
+					mergeMode: { type: "string", enum: ["replace", "append"], description: "Whether the pasted turns should replace or append to the stored session." },
+				},
+			},
+			run: (args) => {
+				const packet = buildSlopCodeLiveRunFinalizePacket({
+					problemName: args.problemName,
+					host: args.host,
+					sessionId: args.sessionId,
+					datasetRoot: args.datasetRoot,
+					provider: args.provider,
+					model: args.model,
+					evidenceKind: args.evidenceKind,
+					transcriptSource: args.transcriptSource,
+					mergeMode: args.mergeMode,
+				})
+				if (!packet) {
+					return toolError(
+						`Unknown SlopCodeBench starter-suite problem: ${asString(args.problemName) ?? "unknown"}. Use balloon_describe_slopcode_starter_suite first.`,
+					)
+				}
+				return textResult(formatSlopCodeLiveRunFinalizePacket(packet), packet as unknown as JsonRecord)
 			},
 		},
 		{

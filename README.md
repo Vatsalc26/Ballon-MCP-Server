@@ -167,16 +167,17 @@ Tools:
 23. `balloon_plan_slopcode_starter_benchmark`
 24. `balloon_prepare_slopcode_problem`
 25. `balloon_prepare_slopcode_live_run_packet`
-26. `balloon_prepare_slopcode_live_run_batch`
-27. `balloon_finalize_slopcode_live_run`
-28. `balloon_finalize_slopcode_live_run_batch`
-29. `balloon_record_slopcode_run_evidence`
-30. `balloon_summarize_slopcode_run_evidence`
-31. `balloon_summarize_slopcode_starter_suite`
-32. `balloon_export_slopcode_starter_artifacts`
-33. `balloon_review_session_drift`
-34. `balloon_update_memory_ledger`
-35. `balloon_explain_gap_report`
+26. `balloon_prepare_slopcode_live_run_finalize_packet`
+27. `balloon_prepare_slopcode_live_run_batch`
+28. `balloon_finalize_slopcode_live_run`
+29. `balloon_finalize_slopcode_live_run_batch`
+30. `balloon_record_slopcode_run_evidence`
+31. `balloon_summarize_slopcode_run_evidence`
+32. `balloon_summarize_slopcode_starter_suite`
+33. `balloon_export_slopcode_starter_artifacts`
+34. `balloon_review_session_drift`
+35. `balloon_update_memory_ledger`
+36. `balloon_explain_gap_report`
 
 Prompts:
 

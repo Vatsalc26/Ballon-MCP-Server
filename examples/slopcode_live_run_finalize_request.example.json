@@ -4,23 +4,18 @@
     "problemName": "file_backup",
     "sessionId": "REPLACE_WITH_YOUR_SESSION_ID",
     "host": "vscode",
-    "provider": "openai",
-    "model": "gpt-5.4",
     "evidenceKind": "live_llm",
     "transcriptSource": "live_host_session",
     "datasetRoot": "REPLACE_WITH_YOUR_SLOPCODEBENCH_ROOT",
     "turns": [
-      {
-        "role": "user",
-        "content": "REPLACE_WITH_REAL_LIVE_OR_REPLAY_TURN_1"
-      },
-      {
-        "role": "assistant",
-        "content": "REPLACE_WITH_REAL_LIVE_OR_REPLAY_TURN_2"
-      }
-    ],
-    "notes": [
-      "Replace the placeholder turns with the real transcript before recording benchmark evidence."
+      { "role": "user", "content": "REPLACE_WITH_REAL_LIVE_OR_REPLAY_TURN_1" },
+      { "role": "assistant", "content": "REPLACE_WITH_REAL_LIVE_OR_REPLAY_TURN_2" },
+      { "role": "user", "content": "PASTE_CHECKPOINT_2_PROMPT_EXACTLY" },
+      { "role": "assistant", "content": "PASTE_ASSISTANT_REPLY_2_EXACTLY" },
+      { "role": "user", "content": "PASTE_CHECKPOINT_3_PROMPT_EXACTLY" },
+      { "role": "assistant", "content": "PASTE_ASSISTANT_REPLY_3_EXACTLY" },
+      { "role": "user", "content": "PASTE_CHECKPOINT_4_PROMPT_EXACTLY" },
+      { "role": "assistant", "content": "PASTE_ASSISTANT_REPLY_4_EXACTLY" }
     ]
   }
 }

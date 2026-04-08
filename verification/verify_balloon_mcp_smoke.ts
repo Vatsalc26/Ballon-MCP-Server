@@ -39,6 +39,7 @@ type SmokeResult = {
 	slopcodeStarterArtifactExportWorked: boolean
 	slopcodeProblemPrepWorked: boolean
 	slopcodeLiveRunPacketWorked: boolean
+	slopcodeLiveRunFinalizePacketWorked: boolean
 	slopcodeLiveRunBatchWorked: boolean
 	slopcodeLiveRunFinalizeWorked: boolean
 	slopcodeLiveRunBatchFinalizeWorked: boolean
@@ -272,6 +273,7 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			hasTool(toolsList, "balloon_export_slopcode_starter_artifacts") &&
 			hasTool(toolsList, "balloon_prepare_slopcode_problem") &&
 			hasTool(toolsList, "balloon_prepare_slopcode_live_run_packet") &&
+			hasTool(toolsList, "balloon_prepare_slopcode_live_run_finalize_packet") &&
 			hasTool(toolsList, "balloon_prepare_slopcode_live_run_batch") &&
 			hasTool(toolsList, "balloon_finalize_slopcode_live_run") &&
 			hasTool(toolsList, "balloon_finalize_slopcode_live_run_batch") &&
@@ -990,6 +992,41 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 				false)
 		details.push(`slopcodeLiveRunPacketWorked=${slopcodeLiveRunPacketWorked ? "yes" : "no"}`)
 
+		const slopcodeLiveRunFinalizePacket = (await client.request("tools/call", {
+			name: "balloon_prepare_slopcode_live_run_finalize_packet",
+			arguments: {
+				problemName: "file_backup",
+				host: "vscode",
+				sessionId: "scbench-vscode-live-file-backup",
+				datasetRoot: "Ballon_architecture/slop-code-bench-main",
+			},
+		})) as {
+			structuredContent?: {
+				problemName?: string
+				host?: string
+				sessionId?: string
+				evidenceKind?: string
+				transcriptSource?: string
+				request?: { tool?: string; arguments?: { datasetRoot?: string; turns?: Array<{ role?: string; content?: string }> } }
+				copyPastePrompt?: string
+				turnPlaceholders?: Array<{ checkpoint?: number }>
+			}
+		}
+		const slopcodeLiveRunFinalizePacketWorked =
+			slopcodeLiveRunFinalizePacket.structuredContent?.problemName === "file_backup" &&
+			slopcodeLiveRunFinalizePacket.structuredContent?.host === "vscode" &&
+			slopcodeLiveRunFinalizePacket.structuredContent?.sessionId === "scbench-vscode-live-file-backup" &&
+			slopcodeLiveRunFinalizePacket.structuredContent?.evidenceKind === "live_llm" &&
+			slopcodeLiveRunFinalizePacket.structuredContent?.transcriptSource === "live_host_session" &&
+			slopcodeLiveRunFinalizePacket.structuredContent?.request?.tool === "balloon_finalize_slopcode_live_run" &&
+			String(slopcodeLiveRunFinalizePacket.structuredContent?.request?.arguments?.datasetRoot ?? "").replace(/\\/g, "/").endsWith(
+				"/Ballon_architecture/slop-code-bench-main",
+			) &&
+			(slopcodeLiveRunFinalizePacket.structuredContent?.request?.arguments?.turns?.length ?? 0) >= 8 &&
+			(slopcodeLiveRunFinalizePacket.structuredContent?.turnPlaceholders?.length ?? 0) >= 4 &&
+			Boolean(slopcodeLiveRunFinalizePacket.structuredContent?.copyPastePrompt?.includes("#balloon_finalize_slopcode_live_run"))
+		details.push(`slopcodeLiveRunFinalizePacketWorked=${slopcodeLiveRunFinalizePacketWorked ? "yes" : "no"}`)
+
 		const slopcodeLiveRunBatch = (await client.request("tools/call", {
 			name: "balloon_prepare_slopcode_live_run_batch",
 			arguments: {
@@ -1414,6 +1451,7 @@ export async function runBalloonMcpSmoke(rootDir = resolveRootDir()): Promise<Sm
 			slopcodeStarterArtifactExportWorked,
 			slopcodeProblemPrepWorked,
 			slopcodeLiveRunPacketWorked,
+			slopcodeLiveRunFinalizePacketWorked,
 			slopcodeLiveRunBatchWorked,
 			slopcodeLiveRunFinalizeWorked,
 			slopcodeLiveRunBatchFinalizeWorked,
@@ -1461,6 +1499,7 @@ export function formatBalloonMcpSmoke(result: SmokeResult): string {
 		`SCBench starter artifact export: ${result.slopcodeStarterArtifactExportWorked ? "PASS" : "FAIL"}`,
 		`SCBench problem preparation: ${result.slopcodeProblemPrepWorked ? "PASS" : "FAIL"}`,
 		`SCBench live-run packet: ${result.slopcodeLiveRunPacketWorked ? "PASS" : "FAIL"}`,
+		`SCBench live-run finalize packet: ${result.slopcodeLiveRunFinalizePacketWorked ? "PASS" : "FAIL"}`,
 		`SCBench live-run batch: ${result.slopcodeLiveRunBatchWorked ? "PASS" : "FAIL"}`,
 		`SCBench live-run finalize: ${result.slopcodeLiveRunFinalizeWorked ? "PASS" : "FAIL"}`,
 		`SCBench live-run batch finalize: ${result.slopcodeLiveRunBatchFinalizeWorked ? "PASS" : "FAIL"}`,
