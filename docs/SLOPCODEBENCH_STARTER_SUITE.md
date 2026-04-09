@@ -169,6 +169,20 @@ The packaged checkpoint solutions are much closer on this Windows environment, b
 
 The remaining failures cluster around connection resets, fork/search state handling, stricter validation edges, and later-route coverage in the packaged checkpoint solutions.
 
+We also now have a repaired disposable final-style workspace at:
+
+1. `Ballon_architecture/balloon_mcp_server/verification/.tmp-codex-trajectory-api-live`
+
+That repaired workspace is fully green locally on this machine:
+
+1. checkpoint 1: `64 passed`
+2. checkpoint 2: `82 passed`
+3. checkpoint 3: `110 passed`
+4. checkpoint 4: `99 passed`
+5. checkpoint 5: `18 passed`
+
+That makes `trajectory_api` the second strong local demo candidate after `file_backup`, even though the packaged checkpoint folders still need their own cleanup.
+
 ### How To Use This Snapshot
 
 Do not present this local validation snapshot as `live_llm` evidence.
