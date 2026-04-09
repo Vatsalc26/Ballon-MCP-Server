@@ -126,3 +126,55 @@ Do not say:
 
 1. Balloon has already beaten SlopCodeBench
 2. Balloon has solved long-horizon coding in general
+
+## Current Local Validation Snapshot
+
+As of `April 10, 2026`, we also have a local Windows validation snapshot for the starter suite.
+
+This section is about local harness truth, not `live_llm` evidence.
+
+### `file_backup`
+
+The current verified local snapshot can be repaired into a fully green disposable workspace on this machine:
+
+1. checkpoint 1: `32 passed`
+2. checkpoint 2: `18 passed`
+3. checkpoint 3: `18 passed`
+4. checkpoint 4: `21 passed`
+
+That makes `file_backup` the cleanest current first demo target for Balloon-backed coding stabilization.
+
+### `execution_server`
+
+The packaged checkpoint solutions are not yet reliable on this Windows environment:
+
+1. checkpoint 1: `23 passed`, `22 failed`
+2. checkpoint 2: `6 passed`, `7 errors`
+3. checkpoint 3: `1 passed`, `44 errors`
+4. checkpoint 4: `48 errors`
+5. checkpoint 5: `4 passed`, `4 failed`, `28 errors`
+6. checkpoint 6: `40 passed`, `30 failed`
+
+The failures cluster around Unix-shell assumptions, quoting, path separators, missing shell commands, and server startup behavior.
+
+### `trajectory_api`
+
+The packaged checkpoint solutions are much closer on this Windows environment, but they are not fully green yet:
+
+1. checkpoint 1: `63 passed`, `1 failed`
+2. checkpoint 2: `68 passed`, `14 failed`
+3. checkpoint 3: `103 passed`, `7 failed`
+4. checkpoint 4: `99 passed`
+5. checkpoint 5: `3 passed`, `15 failed`
+
+The remaining failures cluster around connection resets, fork/search state handling, stricter validation edges, and later-route coverage in the packaged checkpoint solutions.
+
+### How To Use This Snapshot
+
+Do not present this local validation snapshot as `live_llm` evidence.
+
+Use it to:
+
+1. choose the next repair target honestly
+2. pick the safest visible demo target
+3. separate dataset/platform truth from Balloon runtime claims
