@@ -146,7 +146,7 @@ That makes `file_backup` the cleanest current first demo target for Balloon-back
 
 ### `execution_server`
 
-The packaged checkpoint solutions are not yet reliable on this Windows environment:
+The packaged checkpoint solutions are not reliable on this Windows environment:
 
 1. checkpoint 1: `23 passed`, `22 failed`
 2. checkpoint 2: `6 passed`, `7 errors`
@@ -156,6 +156,23 @@ The packaged checkpoint solutions are not yet reliable on this Windows environme
 6. checkpoint 6: `40 passed`, `30 failed`
 
 The failures cluster around Unix-shell assumptions, quoting, path separators, missing shell commands, and server startup behavior.
+
+We also now have a repaired disposable final-style workspace at:
+
+1. `Ballon_architecture/balloon_mcp_server/verification/.tmp-codex-execution-server-live`
+
+That repaired workspace is fully green locally on this machine:
+
+1. checkpoint 1: `45 passed`
+2. checkpoint 2: `13 passed`
+3. checkpoint 3: `45 passed`
+4. checkpoint 4: `48 passed`
+5. checkpoint 5: `36 passed`
+6. checkpoint 6: `70 passed`
+
+The repair depended on Git Bash shell semantics on Windows, byte-accurate stdin handling, tighter timeout accounting, structured-file string fixes, and checkpoint-aware environment validation for the SCBench pytest harness.
+
+That makes `execution_server` a real local demo-capable target too, even though the packaged checkpoint folders still need their own Windows cleanup.
 
 ### `trajectory_api`
 
@@ -182,6 +199,14 @@ That repaired workspace is fully green locally on this machine:
 5. checkpoint 5: `18 passed`
 
 That makes `trajectory_api` the second strong local demo candidate after `file_backup`, even though the packaged checkpoint folders still need their own cleanup.
+
+### Demo Read
+
+As of this local validation snapshot, all 3 starter problems now have repaired disposable workspaces that can be demonstrated honestly on this machine:
+
+1. `file_backup` is still the cleanest first visible demo.
+2. `trajectory_api` is the strongest API-boundary demo.
+3. `execution_server` is now viable too, but it remains the heaviest operational demo.
 
 ### How To Use This Snapshot
 
